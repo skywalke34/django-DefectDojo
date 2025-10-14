@@ -90,7 +90,11 @@ COPY dojo/ ./dojo/
 COPY docker/extra_fixtures/* /app/dojo/fixtures/
 
 COPY tests/ ./tests/
+COPY unittests/ ./unittests/
+COPY requirements-dev.txt ./
 RUN \
+  # Install dev requirements for running tests
+  pip3 install --no-cache-dir -r requirements-dev.txt && \
   # Remove placeholder copied from docker/certs
   rm -f /readme.txt && \
   # Remove placeholder copied from docker/extra_fixtures
