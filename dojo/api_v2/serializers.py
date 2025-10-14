@@ -3189,3 +3189,159 @@ class NotificationWebhooksSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notification_Webhooks
         fields = "__all__"
+
+
+# Universal Parser V2 Serializers
+# These handle pre-normalized findings from the Universal Parser V2 microservice
+class UniversalParserV2FindingSerializer(serializers.Serializer):
+    """
+    Serializer for normalized findings from Universal Parser V2 microservice.
+
+    The microservice has already:
+    - Parsed the scan file using YAML configuration
+    - Extracted and normalized field values
+    - Validated required fields
+
+    This serializer accepts the normalized format and prepares it for DefectDojo import.
+    """
+    # Required fields (validated by microservice)
+    title = serializers.CharField(required=True, allow_blank=False)
+    description = serializers.CharField(required=True, allow_blank=False)
+    severity = serializers.ChoiceField(
+        choices=['Info', 'Low', 'Medium', 'High', 'Critical'],
+        required=True
+    )
+
+    # Optional fields
+    date = serializers.DateField(required=False, allow_null=True)
+    cwe = serializers.IntegerField(required=False, allow_null=True, min_value=0)
+    cvssv3 = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    cvssv3_score = serializers.FloatField(required=False, allow_null=True, min_value=0.0, max_value=10.0)
+    cvssv4 = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    cvssv4_score = serializers.FloatField(required=False, allow_null=True, min_value=0.0, max_value=10.0)
+    mitigation = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    impact = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    references = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    file_path = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    line = serializers.IntegerField(required=False, allow_null=True, min_value=0)
+    component_name = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    component_version = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
+    # Metadata from microservice for deduplication
+    scan_type = serializers.CharField(required=False, allow_null=True)
+    unique_id_from_tool = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
+    # DefectDojo finding status fields
+    active = serializers.BooleanField(default=True, required=False)
+    verified = serializers.BooleanField(default=False, required=False)
+    false_p = serializers.BooleanField(default=False, required=False)
+    duplicate = serializers.BooleanField(default=False, required=False)
+    out_of_scope = serializers.BooleanField(default=False, required=False)
+    risk_accepted = serializers.BooleanField(default=False, required=False)
+
+    # Static vs Dynamic
+    static_finding = serializers.BooleanField(default=False, required=False)
+    dynamic_finding = serializers.BooleanField(default=True, required=False)
+
+
+class UniversalParserV2ReimportScanSerializer(serializers.Serializer):
+    """
+    Serializer for Universal Parser V2 reimport-scan endpoint.
+
+    This endpoint receives pre-normalized findings from the microservice
+    and applies DefectDojo's reimport/deduplication logic.
+
+    Unlike the standard reimport-scan endpoint which receives raw scan files,
+    this endpoint receives structured finding data that has already been
+    parsed and normalized by the microservice.
+    """
+    # Test to reimport into (required)
+    test = serializers.PrimaryKeyRelatedField(
+        queryset=Test.objects.all(),
+        required=True,
+        help_text="ID of the Test to reimport findings into"
+    )
+
+    # Pre-normalized findings from microservice (required)
+    findings = UniversalParserV2FindingSerializer(
+        many=True,
+        required=True,
+        help_text="List of normalized findings from Universal Parser V2 microservice"
+    )
+
+    # Scan metadata
+    scan_date = serializers.DateField(
+        required=True,
+        help_text="Date the scan was performed (YYYY-MM-DD)"
+    )
+    scan_type = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        help_text="Scanner type (optional, can be extracted from findings)"
+    )
+
+    # Reimport behavior settings
+    close_old_findings = serializers.BooleanField(
+        default=True,
+        required=False,
+        help_text="Close findings not present in this scan. Only affects findings within the same test."
+    )
+    do_not_reactivate = serializers.BooleanField(
+        default=False,
+        required=False,
+        help_text="Do not reactivate closed findings if they appear in the scan"
+    )
+
+    # Severity filtering
+    minimum_severity = serializers.ChoiceField(
+        choices=['Info', 'Low', 'Medium', 'High', 'Critical'],
+        required=False,
+        default='Info',
+        help_text="Minimum severity to import (Info, Low, Medium, High, Critical)"
+    )
+
+    # Default status for imported findings
+    active = serializers.BooleanField(
+        default=True,
+        required=False,
+        help_text="Mark imported findings as active"
+    )
+    verified = serializers.BooleanField(
+        default=False,
+        required=False,
+        help_text="Mark imported findings as verified"
+    )
+
+    # Integration settings
+    push_to_jira = serializers.BooleanField(
+        default=False,
+        required=False,
+        help_text="Push findings to JIRA (if configured)"
+    )
+
+    # Version tracking
+    version = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        help_text="Version string for the test (optional)"
+    )
+
+    # Tags
+    tags = TagListSerializerField(
+        required=False,
+        allow_empty=True,
+        help_text="Tags to apply to findings"
+    )
+
+    def validate_findings(self, findings):
+        """Validate that at least one finding is provided."""
+        if not findings or len(findings) == 0:
+            raise serializers.ValidationError("At least one finding must be provided")
+        return findings
+
+    def validate_test(self, test):
+        """Validate that the user has permission to import into this test."""
+        # Permission check will be done in the view
+        return test

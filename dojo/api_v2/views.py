@@ -29,7 +29,7 @@ from drf_spectacular.views import SpectacularAPIView
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.generics import GenericAPIView
-from rest_framework.parsers import MultiPartParser
+from rest_framework.parsers import MultiPartParser, JSONParser
 from rest_framework.permissions import DjangoModelPermissions, IsAuthenticated
 from rest_framework.response import Response
 
@@ -2665,6 +2665,180 @@ class ReImportScanView(mixins.CreateModelMixin, viewsets.GenericViewSet):
                 push_to_jira = push_to_jira or jira_project.push_all_issues
         logger.debug("push_to_jira: %s", push_to_jira)
         serializer.save(push_to_jira=push_to_jira)
+
+
+class UniversalParserV2ReImportScanView(mixins.CreateModelMixin, viewsets.GenericViewSet):
+    """
+    API endpoint for Universal Parser V2 reimport-scan.
+
+    This endpoint receives pre-normalized findings from the Universal Parser V2
+    microservice and processes them using DefectDojo's reimport/deduplication logic.
+
+    Unlike the standard /api/v2/reimport-scan/ endpoint which accepts raw scan files,
+    this endpoint accepts structured, normalized finding data.
+
+    **The Universal Parser V2 microservice handles:**
+    - YAML-based parser configuration
+    - File parsing (JSON, XML, CSV, etc.)
+    - Field extraction and mapping
+    - Data type transformation (severity normalization, string cleanup, etc.)
+    - Initial validation
+
+    **This endpoint handles:**
+    - Deduplication using hash_code and unique_id_from_tool
+    - Closing old findings not present in the scan
+    - Reactivating previously closed findings
+    - Applying user-specified status (active, verified, etc.)
+    - Integration with JIRA (if configured)
+
+    **Example Request:**
+    ```json
+    POST /api/v2/universal-parser-v2/reimport-scan/
+    {
+        "test": 123,
+        "findings": [
+            {
+                "title": "XSS Vulnerability",
+                "description": "Cross-site scripting found in user input",
+                "severity": "High",
+                "cwe": 79,
+                "unique_id_from_tool": "acunetix-xss-001",
+                "scan_type": "Acunetix_360_JSON"
+            }
+        ],
+        "scan_date": "2024-01-15",
+        "close_old_findings": true
+    }
+    ```
+
+    **Example Response:**
+    ```json
+    {
+        "test": 123,
+        "test_import_finding_action": {
+            "created": 1,
+            "closed": 0,
+            "reactivated": 0,
+            "updated": 0,
+            "untouched": 0,
+            "processed": 1
+        }
+    }
+    ```
+    """
+
+    serializer_class = serializers.UniversalParserV2ReimportScanSerializer
+    parser_classes = [JSONParser]
+    queryset = Test.objects.none()
+    permission_classes = (
+        IsAuthenticated,
+        permissions.UserHasReimportPermission,
+    )
+
+    def get_queryset(self):
+        """Return tests the user has permission to import into."""
+        return get_authorized_tests(Permissions.Import_Scan_Result)
+
+    @extend_schema(
+        request=serializers.UniversalParserV2ReimportScanSerializer,
+        responses={201: serializers.TestSerializer},
+        summary="Reimport normalized findings from Universal Parser V2 microservice",
+        description=(
+            "Accepts pre-normalized findings from the Universal Parser V2 microservice "
+            "and applies DefectDojo's reimport/deduplication logic. "
+            "The microservice has already parsed and validated the scan file."
+        ),
+    )
+    def create(self, request, *args, **kwargs):
+        """
+        Process reimport request from Universal Parser V2 microservice.
+
+        The microservice has already:
+        1. Validated the YAML parser configuration
+        2. Parsed the scan file using the configuration
+        3. Normalized findings to DefectDojo format
+        4. Validated required fields (title, description, severity)
+
+        This method:
+        1. Validates the request payload
+        2. Checks user permissions
+        3. Converts normalized findings to Finding objects
+        4. Applies reimport logic (deduplication, closing old findings)
+        5. Returns import statistics
+        """
+        # Validate request
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Extract validated data
+        test = serializer.validated_data['test']
+        findings_data = serializer.validated_data['findings']
+        scan_date = serializer.validated_data['scan_date']
+        close_old_findings = serializer.validated_data.get('close_old_findings', True)
+        do_not_reactivate = serializer.validated_data.get('do_not_reactivate', False)
+        minimum_severity = serializer.validated_data.get('minimum_severity', 'Info')
+        active = serializer.validated_data.get('active', True)
+        verified = serializer.validated_data.get('verified', False)
+        push_to_jira = serializer.validated_data.get('push_to_jira', False)
+        version = serializer.validated_data.get('version')
+        tags = serializer.validated_data.get('tags', [])
+
+        # Check permissions
+        if not request.user.has_perm('dojo.add_test'):
+            return Response(
+                {'error': 'You do not have permission to import findings'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Import findings using Universal Parser V2 reimporter
+        try:
+            from dojo.tools.universal_parser_v2.reimporter import UniversalParserV2ReImporter
+
+            reimporter = UniversalParserV2ReImporter()
+            test_import = reimporter.reimport_findings(
+                test=test,
+                findings_data=findings_data,
+                scan_date=scan_date,
+                close_old_findings=close_old_findings,
+                do_not_reactivate=do_not_reactivate,
+                minimum_severity=minimum_severity,
+                active=active,
+                verified=verified,
+                push_to_jira=push_to_jira,
+                version=version,
+                tags=tags,
+                user=request.user
+            )
+
+            # Return statistics
+            return Response(
+                {
+                    'test': test.id,
+                    'test_import_finding_action': {
+                        'created': test_import.new_findings_count,
+                        'closed': test_import.closed_findings_count,
+                        'reactivated': test_import.reactivated_findings_count,
+                        'updated': test_import.updated_findings_count,
+                        'untouched': test_import.untouched_findings_count,
+                        'processed': test_import.total_findings_count
+                    }
+                },
+                status=status.HTTP_201_CREATED
+            )
+
+        except ImportError:
+            logger.exception("UniversalParserV2ReImporter not found")
+            return Response(
+                {'error': 'Universal Parser V2 reimporter not configured properly'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        except Exception as e:
+            logger.exception(f"Error during Universal Parser V2 reimport: {str(e)}")
+            return Response(
+                {'error': f'Import failed: {str(e)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 
 # Authorization: configuration

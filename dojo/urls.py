@@ -69,6 +69,7 @@ from dojo.api_v2.views import (
     ToolConfigurationsViewSet,
     ToolProductSettingsViewSet,
     ToolTypesViewSet,
+    UniversalParserV2ReImportScanView,
     UserContactInfoViewSet,
     UserProfileView,
     UsersViewSet,
@@ -160,6 +161,7 @@ v2_api.register(r"product_type_members", ProductTypeMemberViewSet, basename="pro
 v2_api.register(r"product_type_groups", ProductTypeGroupViewSet, basename="product_type_group")
 v2_api.register(r"regulations", RegulationsViewSet, basename="regulations")
 v2_api.register(r"reimport-scan", ReImportScanView, basename="reimportscan")
+v2_api.register(r"universal-parser-v2/reimport-scan", UniversalParserV2ReImportScanView, basename="universalparserv2reimportscan")
 v2_api.register(r"request_response_pairs", BurpRawRequestResponseViewSet, basename="request_response_pairs")
 v2_api.register(r"risk_acceptance", RiskAcceptanceViewSet, basename="risk_acceptance")
 v2_api.register(r"roles", RoleViewSet, basename="role")
