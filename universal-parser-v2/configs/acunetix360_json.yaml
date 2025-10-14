@@ -1,0 +1,123 @@
+# Universal Parser V2 - Acunetix 360 JSON Configuration
+#
+# This YAML file defines how to parse Acunetix 360 JSON scan reports
+# and map them to DefectDojo Finding fields.
+#
+# Usage:
+#   1. Upload your Acunetix JSON scan file
+#   2. Upload this YAML configuration file
+#   3. The microservice will parse and normalize findings
+#   4. Findings are imported into DefectDojo
+
+# Parser Metadata
+parser_name: "Acunetix360JSON"
+parser_version: "1.0"
+tool_name: "Acunetix 360 Web Scanner"
+tool_type: "Acunetix_360_JSON"
+
+# File Format Configuration
+file_format: "json"
+file_encoding: "utf-8"
+
+# JSONPath to findings array in scan file
+# The $ represents the root of the JSON document
+# [*] selects all elements in the Vulnerabilities array
+json_root_path: "$.Vulnerabilities[*]"
+
+# Field Mappings
+# Define how each source field from Acunetix maps to a DefectDojo Finding field
+field_mappings:
+  # REQUIRED FIELD: Title
+  - source_field: "Name"
+    target_field: "title"
+    data_type: "string"
+    active: true
+
+  # REQUIRED FIELD: Description
+  - source_field: "Description"
+    target_field: "description"
+    data_type: "string"
+    active: true
+
+  # REQUIRED FIELD: Severity
+  - source_field: "Severity"
+    target_field: "severity"
+    data_type: "severity"
+    active: true
+    severity_mapping:
+      "Critical": "Critical"
+      "High": "High"
+      "Medium": "Medium"
+      "Low": "Low"
+      "Info": "Info"
+      "Informational": "Info"
+
+  # OPTIONAL FIELDS (MVP: commented out for simplicity)
+  # Uncomment and add more field mappings as needed:
+
+  # # CWE (Common Weakness Enumeration)
+  # - source_field: "Classification.Cwe"
+  #   target_field: "cwe"
+  #   data_type: "integer"
+  #   active: false
+
+  # # Date the vulnerability was first seen
+  # - source_field: "FirstSeenDate"
+  #   target_field: "date"
+  #   data_type: "date"
+  #   active: false
+  #   date_format: "%d/%m/%Y %I:%M %p"  # e.g., "16/06/2021 12:30 PM"
+
+  # # CVSS v3 Vector
+  # - source_field: "Classification.Cvss.Vector"
+  #   target_field: "cvssv3"
+  #   data_type: "string"
+  #   active: false
+
+  # # Mitigation advice
+  # - source_field: "RemedialProcedure"
+  #   target_field: "mitigation"
+  #   data_type: "string"
+  #   active: false
+
+  # # Impact description
+  # - source_field: "Impact"
+  #   target_field: "impact"
+  #   data_type: "string"
+  #   active: false
+
+  # # External references
+  # - source_field: "ExternalReferences"
+  #   target_field: "references"
+  #   data_type: "string"
+  #   active: false
+
+  # # Unique identifier from tool
+  # - source_field: "LookupId"
+  #   target_field: "unique_id_from_tool"
+  #   data_type: "string"
+  #   active: false
+
+  # # Static vs Dynamic finding
+  # - source_field: "Type"
+  #   target_field: "static_finding"
+  #   data_type: "boolean"
+  #   active: false
+  #   default: "false"  # Acunetix is a DAST tool
+
+# Deduplication Strategy
+# Define which fields to use for identifying duplicate findings
+# During reimport, findings with matching values in these fields
+# will be considered the same finding and will be updated rather
+# than creating a new finding.
+deduplication_fields:
+  - "title"
+  # Can add more fields for more precise deduplication:
+  # - "description"
+  # - "unique_id_from_tool"
+
+# Notes:
+# - Only active field mappings will be processed
+# - severity_mapping is required for severity data_type
+# - Missing source fields will use default value if provided
+# - Unknown source fields will cause import to fail

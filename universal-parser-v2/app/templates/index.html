@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Universal Parser V2 - DefectDojo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #2d3748;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header .subtitle {
+            color: #718096;
+            font-size: 1.1em;
+        }
+
+        .info-box {
+            background: #f7fafc;
+            border-left: 4px solid #4299e1;
+            padding: 15px;
+            margin-bottom: 30px;
+            border-radius: 4px;
+        }
+
+        .info-box h3 {
+            color: #2c5282;
+            margin-bottom: 8px;
+        }
+
+        .info-box p {
+            color: #4a5568;
+            line-height: 1.6;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        .form-group label {
+            display: block;
+            color: #2d3748;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 0.95em;
+        }
+
+        .form-group label .required {
+            color: #e53e3e;
+        }
+
+        .form-group input[type="file"],
+        .form-group input[type="text"],
+        .form-group input[type="number"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #4299e1;
+        }
+
+        .form-group .help-text {
+            color: #718096;
+            font-size: 0.85em;
+            margin-top: 5px;
+        }
+
+        .divider {
+            margin: 30px 0;
+            text-align: center;
+            position: relative;
+        }
+
+        .divider::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: #e2e8f0;
+        }
+
+        .divider span {
+            background: white;
+            padding: 0 15px;
+            position: relative;
+            color: #a0aec0;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        button {
+            flex: 1;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 1.05em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        button[type="submit"] {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        button[type="submit"]:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        button[type="button"] {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+
+        button[type="button"]:hover {
+            background: #cbd5e0;
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .result-box {
+            margin-top: 30px;
+            padding: 20px;
+            border-radius: 6px;
+            display: none;
+        }
+
+        .result-box.success {
+            background: #f0fff4;
+            border: 2px solid #9ae6b4;
+        }
+
+        .result-box.error {
+            background: #fff5f5;
+            border: 2px solid #fc8181;
+        }
+
+        .result-box h3 {
+            margin-bottom: 10px;
+        }
+
+        .result-box pre {
+            background: #f7fafc;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 0.9em;
+        }
+
+        .spinner {
+            display: none;
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .spinner.active {
+            display: block;
+        }
+
+        .spinner-icon {
+            border: 4px solid #e2e8f0;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e2e8f0;
+            color: #a0aec0;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Universal Parser V2</h1>
+            <p class="subtitle">Parser-as-Code for DefectDojo Security Imports</p>
+        </div>
+
+        <div class="info-box">
+            <h3>📚 How it works:</h3>
+            <p>
+                1. Upload your security scan file (JSON/XML/CSV)<br>
+                2. Upload a YAML configuration that defines how to parse it<br>
+                3. Provide DefectDojo connection details<br>
+                4. Click "Import Scan" and findings will be created in DefectDojo
+            </p>
+        </div>
+
+        <form id="importForm" enctype="multipart/form-data">
+            <div class="form-group">
+                <label>
+                    Scan File <span class="required">*</span>
+                </label>
+                <input type="file" name="scan_file" id="scanFile" required accept=".json,.xml,.csv">
+                <p class="help-text">Security tool scan report (e.g., acunetix_scan.json)</p>
+            </div>
+
+            <div class="form-group">
+                <label>
+                    YAML Configuration <span class="required">*</span>
+                </label>
+                <input type="file" name="yaml_file" id="yamlFile" required accept=".yaml,.yml">
+                <p class="help-text">Parser configuration file (e.g., acunetix360_json.yaml)</p>
+            </div>
+
+            <div class="divider">
+                <span>DefectDojo Connection</span>
+            </div>
+
+            <div class="form-group">
+                <label>
+                    DefectDojo URL <span class="required">*</span>
+                </label>
+                <input type="text" name="defectdojo_url" id="defectdojoUrl"
+                       value="http://localhost:8080" required>
+                <p class="help-text">Base URL of your DefectDojo instance</p>
+            </div>
+
+            <div class="form-group">
+                <label>
+                    API Token <span class="required">*</span>
+                </label>
+                <input type="text" name="defectdojo_api_token" id="apiToken"
+                       placeholder="Enter your DefectDojo API token" required>
+                <p class="help-text">Get this from DefectDojo → Settings → API Key</p>
+            </div>
+
+            <div class="divider">
+                <span>Test Selection</span>
+            </div>
+
+            <div class="form-group">
+                <label>
+                    Test ID (for reimport)
+                </label>
+                <input type="number" name="test_id" id="testId"
+                       placeholder="e.g., 123">
+                <p class="help-text">Provide existing Test ID to reimport. Leave blank to create new.</p>
+            </div>
+
+            <div class="form-group">
+                <label>
+                    Product Name (for new test)
+                </label>
+                <input type="text" name="product_name" id="productName"
+                       placeholder="e.g., My Web Application">
+                <p class="help-text">Required if Test ID not provided</p>
+            </div>
+
+            <div class="form-group">
+                <label>
+                    Engagement Name (for new test)
+                </label>
+                <input type="text" name="engagement_name" id="engagementName"
+                       placeholder="e.g., Sprint 23 Security Testing">
+                <p class="help-text">Required if Test ID not provided</p>
+            </div>
+
+            <div class="form-group">
+                <label>
+                    Test Title (optional)
+                </label>
+                <input type="text" name="test_title" id="testTitle"
+                       placeholder="e.g., Acunetix Scan - 2025-10-13">
+                <p class="help-text">Optional custom test title</p>
+            </div>
+
+            <div class="button-group">
+                <button type="button" onclick="validateYaml()">Validate YAML</button>
+                <button type="submit" id="submitBtn">Import Scan</button>
+            </div>
+        </form>
+
+        <div class="spinner" id="spinner">
+            <div class="spinner-icon"></div>
+            <p>Processing your request...</p>
+        </div>
+
+        <div class="result-box" id="resultBox">
+            <h3 id="resultTitle"></h3>
+            <pre id="resultContent"></pre>
+        </div>
+
+        <div class="footer">
+            <p>Universal Parser V2 - DefectDojo Proof of Concept</p>
+            <p>Built with ❤️ using FastAPI</p>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('importForm');
+        const spinner = document.getElementById('spinner');
+        const resultBox = document.getElementById('resultBox');
+        const resultTitle = document.getElementById('resultTitle');
+        const resultContent = document.getElementById('resultContent');
+        const submitBtn = document.getElementById('submitBtn');
+
+        async function validateYaml() {
+            const yamlFile = document.getElementById('yamlFile').files[0];
+
+            if (!yamlFile) {
+                showResult('error', 'Error', 'Please select a YAML file first');
+                return;
+            }
+
+            showSpinner(true);
+            hideResult();
+
+            const formData = new FormData();
+            formData.append('yaml_file', yamlFile);
+
+            try {
+                const response = await fetch('/api/validate-yaml', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showResult('success', '✅ YAML Valid', JSON.stringify(data, null, 2));
+                } else {
+                    showResult('error', '❌ YAML Invalid', JSON.stringify(data, null, 2));
+                }
+            } catch (error) {
+                showResult('error', '❌ Error', 'Failed to validate YAML: ' + error.message);
+            } finally {
+                showSpinner(false);
+            }
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            showSpinner(true);
+            hideResult();
+            submitBtn.disabled = true;
+
+            const formData = new FormData(form);
+
+            try {
+                const response = await fetch('/api/import', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showResult('success', '✅ Import Successful', JSON.stringify(data, null, 2));
+                } else {
+                    showResult('error', '❌ Import Failed', JSON.stringify(data, null, 2));
+                }
+            } catch (error) {
+                showResult('error', '❌ Error', 'Failed to import scan: ' + error.message);
+            } finally {
+                showSpinner(false);
+                submitBtn.disabled = false;
+            }
+        });
+
+        function showSpinner(show) {
+            spinner.classList.toggle('active', show);
+        }
+
+        function hideResult() {
+            resultBox.style.display = 'none';
+        }
+
+        function showResult(type, title, content) {
+            resultBox.className = `result-box ${type}`;
+            resultTitle.textContent = title;
+            resultContent.textContent = content;
+            resultBox.style.display = 'block';
+            resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    </script>
+</body>
+</html>
