@@ -155,12 +155,13 @@ class UniversalParserV2ReImporter(DefaultReImporter):
         logger.debug(f"Created {len(parsed_findings)} Finding objects from normalized data")
 
         # Use importer's process_findings for deduplication
+        # IMPORTANT: Pass sync=True to get Finding objects instead of serialized JSON
         (
             new_findings,
             reactivated_findings,
             findings_to_mitigate,
             untouched_findings,
-        ) = importer.process_findings(parsed_findings)
+        ) = importer.process_findings(parsed_findings, sync=True)
 
         # Close old findings
         closed_findings = importer.close_old_findings(findings_to_mitigate)

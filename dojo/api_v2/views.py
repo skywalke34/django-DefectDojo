@@ -2810,17 +2810,30 @@ class UniversalParserV2ReImportScanView(mixins.CreateModelMixin, viewsets.Generi
                 user=request.user
             )
 
+            # Get statistics from the test_import object
+            # Note: We use the statistics property which queries the database
+            # to get the counts since they're not directly available on the instance
+            from dojo.models import Test_Import_Finding_Action, IMPORT_ACTIONS
+
+            stats = {}
+            for action_code, action_name in IMPORT_ACTIONS:
+                count = Test_Import_Finding_Action.objects.filter(
+                    test_import=test_import,
+                    action=action_code
+                ).count()
+                stats[action_name.lower().replace(' ', '_')] = count
+
             # Return statistics
             return Response(
                 {
                     'test': test.id,
                     'test_import_finding_action': {
-                        'created': test_import.new_findings_count,
-                        'closed': test_import.closed_findings_count,
-                        'reactivated': test_import.reactivated_findings_count,
-                        'updated': test_import.updated_findings_count,
-                        'untouched': test_import.untouched_findings_count,
-                        'processed': test_import.total_findings_count
+                        'created': stats.get('created_finding', 0),
+                        'closed': stats.get('closed_finding', 0),
+                        'reactivated': stats.get('reactivated_finding', 0),
+                        'updated': stats.get('updated_finding', 0),
+                        'untouched': stats.get('untouched_finding', 0),
+                        'processed': sum(stats.values())
                     }
                 },
                 status=status.HTTP_201_CREATED
