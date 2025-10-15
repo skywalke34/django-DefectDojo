@@ -16,7 +16,21 @@ from datetime import date
 
 from django.utils import timezone
 
-from dojo.models import Development_Environment, Engagement, Finding, Product, Product_Type, Test, Test_Type, User
+from dojo.models import (
+    Development_Environment, 
+    Engagement, 
+    Finding, 
+    Product, 
+    Product_Type, 
+    Test, 
+    Test_Type, 
+    Test_Import_Finding_Action,
+    IMPORT_CREATED_FINDING,
+    IMPORT_CLOSED_FINDING,
+    IMPORT_REACTIVATED_FINDING,
+    IMPORT_UNTOUCHED_FINDING,
+    User
+)
 from dojo.tools.universal_parser_v2.reimporter import UniversalParserV2ReImporter
 from unittests.dojo_test_case import DojoTestCase
 
@@ -25,6 +39,13 @@ logger = logging.getLogger(__name__)
 
 class TestUniversalParserV2ReImporter(DojoTestCase):
     """Test cases for UniversalParserV2ReImporter."""
+
+    def _get_import_count(self, test_import, action):
+        """Helper method to get count for a specific import action."""
+        return Test_Import_Finding_Action.objects.filter(
+            test_import=test_import,
+            action=action
+        ).count()
 
     def setUp(self):
         """Set up test fixtures for each test."""
@@ -120,9 +141,9 @@ class TestUniversalParserV2ReImporter(DojoTestCase):
         )
 
         # Verify import statistics
-        self.assertEqual(3, test_import.new_findings_count)
-        self.assertEqual(0, test_import.closed_findings_count)
-        self.assertEqual(0, test_import.reactivated_findings_count)
+        self.assertEqual(3, self._get_import_count(test_import, IMPORT_CREATED_FINDING))
+        self.assertEqual(0, self._get_import_count(test_import, IMPORT_CLOSED_FINDING))
+        self.assertEqual(0, self._get_import_count(test_import, IMPORT_REACTIVATED_FINDING))
 
         # Verify findings were created
         findings = Finding.objects.filter(test=self.test)
@@ -164,7 +185,7 @@ class TestUniversalParserV2ReImporter(DojoTestCase):
             user=self.user,
         )
 
-        self.assertEqual(3, test_import1.new_findings_count)
+        self.assertEqual(3, self._get_import_count(test_import1, IMPORT_CREATED_FINDING))
 
         # Second import with same findings
         test_import2 = self.reimporter.reimport_findings(
@@ -176,8 +197,8 @@ class TestUniversalParserV2ReImporter(DojoTestCase):
         )
 
         # Should have 0 new findings (all deduplicated)
-        self.assertEqual(0, test_import2.new_findings_count)
-        self.assertEqual(3, test_import2.untouched_findings_count)
+        self.assertEqual(0, self._get_import_count(test_import2, IMPORT_CREATED_FINDING))
+        self.assertEqual(3, self._get_import_count(test_import2, IMPORT_UNTOUCHED_FINDING))
 
         # Total findings should still be 3
         findings = Finding.objects.filter(test=self.test, active=True)
@@ -212,9 +233,9 @@ class TestUniversalParserV2ReImporter(DojoTestCase):
         )
 
         # Verify 2 findings were closed
-        self.assertEqual(2, test_import.closed_findings_count)
-        self.assertEqual(0, test_import.new_findings_count)
-        self.assertEqual(1, test_import.untouched_findings_count)
+        self.assertEqual(2, self._get_import_count(test_import, IMPORT_CLOSED_FINDING))
+        self.assertEqual(0, self._get_import_count(test_import, IMPORT_CREATED_FINDING))
+        self.assertEqual(1, self._get_import_count(test_import, IMPORT_UNTOUCHED_FINDING))
 
         # Verify only 1 active finding remains
         active_findings_after = Finding.objects.filter(test=self.test, active=True).count()
@@ -262,8 +283,8 @@ class TestUniversalParserV2ReImporter(DojoTestCase):
         )
 
         # Verify 2 findings were reactivated
-        self.assertEqual(2, test_import.reactivated_findings_count)
-        self.assertEqual(0, test_import.new_findings_count)
+        self.assertEqual(2, self._get_import_count(test_import, IMPORT_REACTIVATED_FINDING))
+        self.assertEqual(0, self._get_import_count(test_import, IMPORT_CREATED_FINDING))
 
         # Verify all 3 findings are now active
         active_findings = Finding.objects.filter(test=self.test, active=True).count()
@@ -303,7 +324,7 @@ class TestUniversalParserV2ReImporter(DojoTestCase):
         )
 
         # Verify no reactivations occurred
-        self.assertEqual(0, test_import.reactivated_findings_count)
+        self.assertEqual(0, self._get_import_count(test_import, IMPORT_REACTIVATED_FINDING))
 
         # Verify only 1 finding is active (the one that was never closed)
         active_findings = Finding.objects.filter(test=self.test, active=True).count()
@@ -323,7 +344,7 @@ class TestUniversalParserV2ReImporter(DojoTestCase):
         )
 
         # Should only create 2 findings (Critical and High, not Medium)
-        self.assertEqual(2, test_import.new_findings_count)
+        self.assertEqual(2, self._get_import_count(test_import, IMPORT_CREATED_FINDING))
 
         findings = Finding.objects.filter(test=self.test)
         self.assertEqual(2, findings.count())
@@ -374,7 +395,7 @@ class TestUniversalParserV2ReImporter(DojoTestCase):
             user=self.user,
         )
 
-        self.assertEqual(1, test_import.new_findings_count)
+        self.assertEqual(1, self._get_import_count(test_import, IMPORT_CREATED_FINDING))
 
         finding = Finding.objects.get(test=self.test)
         self.assertEqual('Minimal Finding', finding.title)
@@ -466,7 +487,7 @@ class TestUniversalParserV2ReImporter(DojoTestCase):
             user=self.user,
         )
 
-        self.assertEqual(3, test_import.new_findings_count)
+        self.assertEqual(3, self._get_import_count(test_import, IMPORT_CREATED_FINDING))
 
         # Note: Tag verification would require checking test.tags
         # The reimporter applies tags to the test, not individual findings
