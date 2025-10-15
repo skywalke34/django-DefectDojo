@@ -2,16 +2,19 @@
 
 from app.parsers.data_types.string_parser import StringParser
 from app.parsers.data_types.severity_parser import SeverityParser
+from app.parsers.data_types.date_parser import DateParser
+from app.parsers.data_types.integer_parser import IntegerParser
+from app.parsers.data_types.boolean_parser import BooleanParser
 
-__all__ = ['StringParser', 'SeverityParser']
+__all__ = ['StringParser', 'SeverityParser', 'DateParser', 'IntegerParser', 'BooleanParser']
 
 # Registry of available data type parsers
 DATA_TYPE_PARSERS = {
     'string': StringParser(),
     'severity': SeverityParser(),
-    # Future: 'date': DateParser(),
-    # Future: 'integer': IntegerParser(),
-    # Future: 'boolean': BooleanParser(),
+    'date': DateParser(),
+    'integer': IntegerParser(),
+    'boolean': BooleanParser(),
     # Future: 'cvss': CVSSParser(),
 }
 
