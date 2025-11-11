@@ -5,8 +5,10 @@ from app.parsers.data_types.severity_parser import SeverityParser
 from app.parsers.data_types.date_parser import DateParser
 from app.parsers.data_types.integer_parser import IntegerParser
 from app.parsers.data_types.boolean_parser import BooleanParser
+from app.parsers.data_types.float_parser import FloatParser
+from app.parsers.data_types.array_parser import ArrayParser
 
-__all__ = ['StringParser', 'SeverityParser', 'DateParser', 'IntegerParser', 'BooleanParser']
+__all__ = ['StringParser', 'SeverityParser', 'DateParser', 'IntegerParser', 'BooleanParser', 'FloatParser', 'ArrayParser']
 
 # Registry of available data type parsers
 DATA_TYPE_PARSERS = {
@@ -15,6 +17,8 @@ DATA_TYPE_PARSERS = {
     'date': DateParser(),
     'integer': IntegerParser(),
     'boolean': BooleanParser(),
+    'float': FloatParser(),
+    'array': ArrayParser(),
     # Future: 'cvss': CVSSParser(),
 }
 

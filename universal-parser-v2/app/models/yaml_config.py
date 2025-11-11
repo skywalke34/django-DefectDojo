@@ -56,7 +56,7 @@ class FieldMapping(BaseModel):
     @validator('data_type')
     def validate_data_type(cls, v):
         """Ensure data type is supported"""
-        allowed = ['string', 'severity', 'date', 'integer', 'boolean']
+        allowed = ['string', 'severity', 'date', 'integer', 'boolean', 'float', 'array']
         if v not in allowed:
             raise ValueError(
                 f"data_type must be one of {allowed}, got '{v}'"
