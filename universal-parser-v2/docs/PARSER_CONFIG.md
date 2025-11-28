@@ -50,7 +50,10 @@ csv_skip_rows: integer      # OPTIONAL for CSV: Rows to skip before header
 
 # ===== FIELD MAPPINGS =====
 field_mappings:             # REQUIRED: List of field mappings
-  - source_field: string    # REQUIRED: Field path in scan file
+  # Source field options (use ONE of source_field OR source_fields)
+  - source_field: string    # Single field path in scan file
+    source_fields: [string] # OR: Priority list of fields (first non-null wins)
+
     target_field: string    # REQUIRED: DefectDojo Finding field
     data_type: string       # REQUIRED: Data type parser to use
     active: boolean         # OPTIONAL: Default true
@@ -61,6 +64,7 @@ field_mappings:             # REQUIRED: List of field mappings
 
     date_format: string     # OPTIONAL for data_type: "date"
     default: string         # OPTIONAL: Default value if field missing
+    template: string        # REQUIRED for data_type: "template"
 
 # ===== DEDUPLICATION =====
 deduplication_fields:       # OPTIONAL: List of fields for deduplication
@@ -335,23 +339,87 @@ Each field mapping has the following structure:
 
 ```yaml
 field_mappings:
-  - source_field: string      # REQUIRED
+  # Option 1: Single source field
+  - source_field: string      # Single field path
     target_field: string      # REQUIRED
     data_type: string         # REQUIRED
     active: boolean           # OPTIONAL (default: true)
     severity_mapping: dict    # REQUIRED for severity type
     date_format: string       # OPTIONAL for date type
     default: any              # OPTIONAL
+
+  # Option 2: Priority chain (alternative field names)
+  - source_fields: [string]   # List of field paths to try in order
+    target_field: string      # REQUIRED
+    data_type: string         # REQUIRED
+    # ... same options as above
+
+  # Option 3: Template string
+  - target_field: string      # REQUIRED
+    data_type: "template"     # Must be "template"
+    template: string          # Template with {field} placeholders
 ```
+
+**Note**: Use `source_field` OR `source_fields`, not both. Templates don't need either.
 
 ---
 
-#### `source_field` (Required)
+#### `source_fields` - Priority Chain / Alternative Fields
 
-Path to the field in the scan file.
+Use `source_fields` when the same data might appear under different field names in the scan file.
+This is common with tools like Tenable that have 20+ alternative names for the same data.
+
+**Semantics**:
+1. Try each field path in order
+2. Return the first non-null, non-empty value found
+3. If all sources fail, use `default` value (if provided)
+4. Apply `data_type` parser to the extracted value
+
+**Example - Tenable CSV alternative field names**:
+```yaml
+field_mappings:
+  # Title can come from multiple fields
+  - source_fields: ["Name", "Plugin Name", "asset.name"]
+    target_field: "title"
+    data_type: "string"
+
+  # Description has 3 possible sources
+  - source_fields: ["Synopsis", "definition.synopsis", "Description"]
+    target_field: "description"
+    data_type: "string"
+
+  # Mitigation with fallback default
+  - source_fields: ["Solution", "definition.solution", "Steps to Remediate"]
+    target_field: "mitigation"
+    data_type: "string"
+    default: "N/A"
+```
+
+**Example - Nested field priority**:
+```yaml
+field_mappings:
+  # Try nested paths in order
+  - source_fields: ["vuln.name", "metadata.title", "name"]
+    target_field: "title"
+    data_type: "string"
+```
+
+**When to use `source_fields`**:
+- Security tool has multiple export formats
+- Fields have different names across tool versions
+- Alternative field names for backward compatibility
+- CSV tools with inconsistent column naming
+
+---
+
+#### `source_field` (Required*)
+
+Path to a single field in the scan file.
 
 **Type**: String
-**Required**: Yes
+**Required**: Yes, unless using `source_fields` or `data_type: "template"`
+
+*Use `source_field` for single-field extraction, or `source_fields` for priority chains.
 
 **JSON Examples**:
 ```yaml

@@ -12,16 +12,33 @@ class FieldMapping(BaseModel):
     """
     Defines how a single field from the scan file maps to a DefectDojo Finding field.
 
-    Example:
+    Supports two source field modes:
+    1. Single source: source_field="Name"
+    2. Priority chain: source_fields=["Name", "Plugin Name", "asset.name"]
+       (first non-null value is used)
+
+    Example (single source):
         source_field: "Name"
+        target_field: "title"
+        data_type: "string"
+        active: true
+
+    Example (priority chain - first available):
+        source_fields: ["Name", "Plugin Name", "asset.name"]
         target_field: "title"
         data_type: "string"
         active: true
     """
     source_field: Optional[str] = Field(
         default=None,
-        description="Field path in scan file (e.g., 'Name' or 'Classification.Cwe'). "
-                    "Required for all data_types except 'template'."
+        description="Single field path in scan file (e.g., 'Name' or 'Classification.Cwe'). "
+                    "Use source_field OR source_fields, not both."
+    )
+    source_fields: Optional[List[str]] = Field(
+        default=None,
+        description="List of field paths to try in order (first non-null wins). "
+                    "Use for alternative field names like ['Name', 'Plugin Name', 'asset.name']. "
+                    "Use source_field OR source_fields, not both."
     )
     target_field: str = Field(
         ...,
@@ -117,30 +134,79 @@ class FieldMapping(BaseModel):
         return v
 
     @root_validator(skip_on_failure=True)
-    def validate_template_requirements(cls, values):
+    def validate_source_field_requirements(cls, values):
         """
-        Validate template-specific requirements:
-        - If data_type='template', template string is required
-        - If data_type is not 'template', source_field is required
+        Validate source field requirements based on data_type:
+
+        - If data_type='template': template string required, no source_field/source_fields needed
+        - Otherwise: EITHER source_field OR source_fields required (not both, not neither)
+
+        This supports:
+        1. Single source: source_field="Name"
+        2. Priority chain: source_fields=["Name", "Plugin Name", "asset.name"]
         """
         data_type = values.get('data_type')
         template = values.get('template')
         source_field = values.get('source_field')
+        source_fields = values.get('source_fields')
 
         if data_type == 'template':
+            # Template data type requires template string, not source fields
             if not template:
                 raise ValueError(
                     "template is required when data_type='template'. "
                     "Provide a template string with {field_path} placeholders."
                 )
+            # Warn if source_field/source_fields provided with template (they're ignored)
+            if source_field or source_fields:
+                import warnings
+                warnings.warn(
+                    "source_field/source_fields are ignored when data_type='template'. "
+                    "Template extracts fields from the template string placeholders."
+                )
         else:
-            # For all other data_types, source_field is required
-            if not source_field:
+            # For all other data_types, need either source_field OR source_fields
+            has_source_field = source_field is not None and source_field != ""
+            has_source_fields = source_fields is not None and len(source_fields) > 0
+
+            if has_source_field and has_source_fields:
                 raise ValueError(
-                    f"source_field is required when data_type='{data_type}'"
+                    "Cannot specify both 'source_field' and 'source_fields'. "
+                    "Use 'source_field' for a single source, or 'source_fields' for "
+                    "a priority chain of alternative field names."
+                )
+
+            if not has_source_field and not has_source_fields:
+                raise ValueError(
+                    f"Either 'source_field' or 'source_fields' is required when "
+                    f"data_type='{data_type}'. Use 'source_field' for a single source, "
+                    f"or 'source_fields' for a priority chain."
+                )
+
+            # Validate source_fields has at least one entry if provided
+            if has_source_fields and len(source_fields) == 0:
+                raise ValueError(
+                    "source_fields must contain at least one field path"
                 )
 
         return values
+
+    def get_source_fields_list(self) -> List[str]:
+        """
+        Get list of source fields to try (for unified extraction logic).
+
+        Returns:
+            List of field paths to try in order.
+            - If source_fields is set, returns that list
+            - If source_field is set, returns [source_field]
+            - Otherwise returns empty list
+        """
+        if self.source_fields:
+            return self.source_fields
+        elif self.source_field:
+            return [self.source_field]
+        else:
+            return []
 
 
 class YAMLConfig(BaseModel):

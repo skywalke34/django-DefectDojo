@@ -156,11 +156,10 @@ class NormalizerService:
                     normalized[field_mapping.target_field] = parsed_value
                 continue
 
-            # Extract raw value from source field
-            raw_value = FieldExtractor.extract(
+            # Extract raw value using priority chain (source_fields) or single source
+            raw_value, matched_field = self._extract_first_available(
                 raw_finding,
-                field_mapping.source_field,
-                default=None
+                field_mapping
             )
 
             # Skip if no value found and field is not required
@@ -168,7 +167,7 @@ class NormalizerService:
                 continue
 
             # Parse/transform the value
-            parsed_value = self._parse_field_value(raw_value, field_mapping)
+            parsed_value = self._parse_field_value(raw_value, field_mapping, matched_field)
 
             # Store in normalized finding
             normalized[field_mapping.target_field] = parsed_value
@@ -181,13 +180,90 @@ class NormalizerService:
 
         return normalized
 
-    def _parse_field_value(self, value: Any, field_mapping: FieldMapping) -> Any:
+    def _extract_first_available(
+        self,
+        raw_finding: dict,
+        field_mapping: FieldMapping
+    ) -> tuple[Any, str | None]:
+        """
+        Extract the first available value from source_fields or source_field.
+
+        Implements "first-available" semantics for priority chains:
+        - Tries each source field in order
+        - Returns the first non-null, non-empty value found
+        - If all sources fail, returns (None, None)
+
+        Args:
+            raw_finding: Raw finding dictionary from scan file
+            field_mapping: Field mapping configuration
+
+        Returns:
+            Tuple of (extracted_value, matched_field_name)
+            - extracted_value: The first non-null value found, or None
+            - matched_field_name: The field path that matched, or None
+
+        Example:
+            # With source_fields=["Name", "Plugin Name", "asset.name"]
+            # If raw_finding has {"Plugin Name": "SQL Injection"}
+            # Returns ("SQL Injection", "Plugin Name")
+        """
+        # Get list of source fields to try (handles both source_field and source_fields)
+        source_fields_list = field_mapping.get_source_fields_list()
+
+        if not source_fields_list:
+            logger.debug(
+                f"No source fields configured for target '{field_mapping.target_field}'"
+            )
+            return None, None
+
+        # Try each source field in order
+        for source_field in source_fields_list:
+            value = FieldExtractor.extract(
+                raw_finding,
+                source_field,
+                default=None
+            )
+
+            # Check if we got a valid (non-null, non-empty) value
+            if value is not None:
+                # For strings, also check if non-empty after stripping
+                if isinstance(value, str):
+                    if value.strip():
+                        logger.debug(
+                            f"Priority chain: matched '{source_field}' for "
+                            f"target '{field_mapping.target_field}'"
+                        )
+                        return value, source_field
+                else:
+                    # Non-string values (int, dict, list, etc.) - just check not None
+                    logger.debug(
+                        f"Priority chain: matched '{source_field}' for "
+                        f"target '{field_mapping.target_field}'"
+                    )
+                    return value, source_field
+
+        # No source field had a valid value
+        if len(source_fields_list) > 1:
+            logger.debug(
+                f"Priority chain: no match found for target '{field_mapping.target_field}' "
+                f"(tried: {source_fields_list})"
+            )
+
+        return None, None
+
+    def _parse_field_value(
+        self,
+        value: Any,
+        field_mapping: FieldMapping,
+        matched_field: str | None = None
+    ) -> Any:
         """
         Parse/transform a field value using appropriate data type parser.
 
         Args:
             value: Raw value to parse
             field_mapping: Field mapping configuration
+            matched_field: The actual source field that was matched (for logging)
 
         Returns:
             Parsed/transformed value
@@ -218,8 +294,10 @@ class NormalizerService:
         try:
             return parser.parse(value, parser_config)
         except Exception as e:
+            # Use matched_field for logging if available, otherwise describe source
+            source_desc = matched_field or field_mapping.source_field or "source_fields"
             logger.warning(
-                f"Failed to parse {field_mapping.source_field} "
+                f"Failed to parse {source_desc} "
                 f"(type={field_mapping.data_type}): {str(e)}"
             )
             # Return raw value if parsing fails

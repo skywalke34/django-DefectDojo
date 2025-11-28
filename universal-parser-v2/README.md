@@ -20,20 +20,45 @@ Universal Parser V2 is a microservice-based parser system for DefectDojo that al
 ## 🏗️ Architecture
 
 ```
-┌─────────────────┐      ┌──────────────────────────┐      ┌─────────────────┐
-│   Scan File     │─────▶│  Universal Parser V2     │─────▶│   DefectDojo    │
-│  (JSON/XML/CSV) │      │     Microservice         │      │                 │
-└─────────────────┘      └──────────────────────────┘      └─────────────────┘
-                                    │                                │
-                                    │                                │
-                         ┌──────────▼──────────┐          ┌────────▼─────────┐
-                         │  YAML Parser        │          │  Reimporter      │
-                         │  Configuration      │          │  (Deduplication) │
-                         └─────────────────────┘          └──────────────────┘
+                              USER PROVIDES BOTH INPUTS
+                    ┌────────────────────────────────────────┐
+                    │                                        │
+                    ▼                                        ▼
+          ┌─────────────────┐                    ┌─────────────────────┐
+          │   Scan File     │                    │   YAML Parser       │
+          │  (JSON/XML/CSV) │                    │   Configuration     │
+          └────────┬────────┘                    └──────────┬──────────┘
+                   │                                        │
+                   │         ┌──────────────────────────┐   │
+                   └────────▶│  Universal Parser V2     │◀──┘
+                             │     Microservice         │
+                             │                          │
+                             │  ┌────────────────────┐  │
+                             │  │   Parser Engine    │  │
+                             │  │ (Field Extraction, │  │
+                             │  │  Normalization)    │  │
+                             │  └────────────────────┘  │
+                             └────────────┬─────────────┘
+                                          │
+                                          │ Pre-normalized
+                                          │ Findings (JSON)
+                                          ▼
+                             ┌──────────────────────────┐
+                             │      DefectDojo          │
+                             │                          │
+                             │  ┌────────────────────┐  │
+                             │  │    Reimporter      │  │
+                             │  │  (Deduplication)   │  │
+                             │  └────────────────────┘  │
+                             └──────────────────────────┘
 ```
 
+**User Inputs (BOTH Required):**
+1. **Scan File**: Security tool output (JSON, XML, or CSV format)
+2. **YAML Parser Configuration**: Defines how to extract and map fields
+
 **Components:**
-1. **Microservice** (FastAPI): Accepts scan files and YAML parser configs
+1. **Microservice** (FastAPI): Accepts scan file + YAML config together
 2. **Parser Engine**: Extracts and normalizes findings based on YAML rules
 3. **DefectDojo Integration**: New API endpoint for pre-normalized findings
 4. **Reimporter**: Handles deduplication using DefectDojo's existing logic
