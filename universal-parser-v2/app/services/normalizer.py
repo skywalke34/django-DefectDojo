@@ -149,6 +149,13 @@ class NormalizerService:
             if not field_mapping.active:
                 continue
 
+            # Handle template data type specially - it needs access to all fields
+            if field_mapping.data_type == 'template':
+                parsed_value = self._parse_template_field(raw_finding, field_mapping)
+                if parsed_value:
+                    normalized[field_mapping.target_field] = parsed_value
+                continue
+
             # Extract raw value from source field
             raw_value = FieldExtractor.extract(
                 raw_finding,
@@ -217,6 +224,41 @@ class NormalizerService:
             )
             # Return raw value if parsing fails
             return value
+
+    def _parse_template_field(self, raw_finding: dict, field_mapping: FieldMapping) -> Any:
+        """
+        Parse a template field using the template parser.
+
+        Template fields need access to the entire raw finding dict
+        to interpolate multiple field values into a single output.
+
+        Args:
+            raw_finding: Raw finding dictionary from scan file
+            field_mapping: Field mapping configuration with template string
+
+        Returns:
+            Interpolated string with field values substituted
+        """
+        try:
+            parser = get_parser('template')
+        except ValueError as e:
+            logger.warning(f"Template parser not available: {str(e)}")
+            return None
+
+        # Build parser configuration with template string
+        parser_config = {
+            'template': field_mapping.template
+        }
+
+        # Parse the template, passing the entire raw finding
+        try:
+            result = parser.parse(raw_finding, parser_config)
+            return result if result else None
+        except Exception as e:
+            logger.warning(
+                f"Failed to parse template for {field_mapping.target_field}: {str(e)}"
+            )
+            return None
 
     def _add_metadata_fields(self, normalized: dict, raw_finding: dict):
         """

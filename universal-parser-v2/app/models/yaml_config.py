@@ -5,7 +5,7 @@ These models define and validate the structure of parser-as-code YAML files.
 """
 
 from typing import Dict, List, Optional
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, root_validator
 
 
 class FieldMapping(BaseModel):
@@ -18,9 +18,10 @@ class FieldMapping(BaseModel):
         data_type: "string"
         active: true
     """
-    source_field: str = Field(
-        ...,
-        description="Field path in scan file (e.g., 'Name' or 'Classification.Cwe')"
+    source_field: Optional[str] = Field(
+        default=None,
+        description="Field path in scan file (e.g., 'Name' or 'Classification.Cwe'). "
+                    "Required for all data_types except 'template'."
     )
     target_field: str = Field(
         ...,
@@ -53,10 +54,17 @@ class FieldMapping(BaseModel):
         description="Default value if source field is missing or null"
     )
 
+    # Optional: Template string for multi-field composition
+    template: Optional[str] = Field(
+        default=None,
+        description="Template string with {field_path} placeholders for multi-field composition. "
+                    "Required when data_type='template'. Example: '{cve} affects (version: {version})'"
+    )
+
     @validator('data_type')
     def validate_data_type(cls, v):
         """Ensure data type is supported"""
-        allowed = ['string', 'severity', 'date', 'integer', 'boolean', 'float', 'array']
+        allowed = ['string', 'severity', 'date', 'integer', 'boolean', 'float', 'array', 'template']
         if v not in allowed:
             raise ValueError(
                 f"data_type must be one of {allowed}, got '{v}'"
@@ -107,6 +115,32 @@ class FieldMapping(BaseModel):
             )
 
         return v
+
+    @root_validator(skip_on_failure=True)
+    def validate_template_requirements(cls, values):
+        """
+        Validate template-specific requirements:
+        - If data_type='template', template string is required
+        - If data_type is not 'template', source_field is required
+        """
+        data_type = values.get('data_type')
+        template = values.get('template')
+        source_field = values.get('source_field')
+
+        if data_type == 'template':
+            if not template:
+                raise ValueError(
+                    "template is required when data_type='template'. "
+                    "Provide a template string with {field_path} placeholders."
+                )
+        else:
+            # For all other data_types, source_field is required
+            if not source_field:
+                raise ValueError(
+                    f"source_field is required when data_type='{data_type}'"
+                )
+
+        return values
 
 
 class YAMLConfig(BaseModel):
