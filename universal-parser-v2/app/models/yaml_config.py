@@ -4,8 +4,32 @@ Pydantic models for Universal Parser V2 YAML configuration schema.
 These models define and validate the structure of parser-as-code YAML files.
 """
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, validator, root_validator
+
+
+class ConditionalAppend(BaseModel):
+    """
+    Defines a conditional append rule for building fields with optional sections.
+
+    When the source_field exists and has a non-empty value, the prefix
+    followed by the source value will be appended to the base field value.
+
+    Example:
+        source_field: "target"
+        prefix: "\n**Target:** "
+
+    If target="https://example.com", appends: "\n**Target:** https://example.com"
+    If target is null/empty, nothing is appended.
+    """
+    source_field: str = Field(
+        ...,
+        description="Field path to check and extract value from"
+    )
+    prefix: str = Field(
+        ...,
+        description="Text to prepend before the source value (e.g., '\\n**Target:** ')"
+    )
 
 
 class FieldMapping(BaseModel):
@@ -78,10 +102,34 @@ class FieldMapping(BaseModel):
                     "Required when data_type='template'. Example: '{cve} affects (version: {version})'"
     )
 
+    # Optional: Fixed/constant value (ignores source_field)
+    fixed_value: Optional[Any] = Field(
+        default=None,
+        description="Fixed constant value to use for this field. When set, source_field is not required. "
+                    "Example: fixed_value='High' for severity, fixed_value=798 for cwe."
+    )
+
+    # Optional: Conditional append rules for building composite fields
+    append_if_present: Optional[List[ConditionalAppend]] = Field(
+        default=None,
+        description="List of conditional append rules. Each rule appends prefix + source value "
+                    "to the base field value if the source field exists and has a non-empty value. "
+                    "Example: append_if_present: [{source_field: 'target', prefix: '\\n**Target:** '}]"
+    )
+
+    # Optional: State machine mapping for status/state conversion
+    state_mapping: Optional[Dict[str, Dict[str, Any]]] = Field(
+        default=None,
+        description="State machine mapping that converts a single input value to multiple output fields. "
+                    "Each key is an input state value, and the value is a dict of target_field: value pairs. "
+                    "Use 'default' key for fallback when input doesn't match any defined state. "
+                    "Example: state_mapping: {'not_affected': {'active': false, 'is_mitigated': true}}"
+    )
+
     @validator('data_type')
     def validate_data_type(cls, v):
         """Ensure data type is supported"""
-        allowed = ['string', 'severity', 'date', 'integer', 'boolean', 'float', 'array', 'template']
+        allowed = ['string', 'severity', 'date', 'integer', 'boolean', 'float', 'array', 'template', 'state_machine']
         if v not in allowed:
             raise ValueError(
                 f"data_type must be one of {allowed}, got '{v}'"
@@ -110,6 +158,27 @@ class FieldMapping(BaseModel):
 
         return v
 
+    @validator('state_mapping', always=True)
+    def validate_state_mapping(cls, v, values):
+        """If data_type is state_machine, state_mapping must be provided"""
+        data_type = values.get('data_type')
+
+        if data_type == 'state_machine':
+            if not v:
+                raise ValueError(
+                    "state_mapping is required when data_type='state_machine'. "
+                    "Provide a mapping of input states to output field dictionaries."
+                )
+            # Validate each state maps to a dictionary
+            for state_name, outputs in v.items():
+                if not isinstance(outputs, dict):
+                    raise ValueError(
+                        f"state_mapping['{state_name}'] must be a dictionary of "
+                        f"target_field: value pairs, got {type(outputs).__name__}"
+                    )
+
+        return v
+
     @validator('target_field')
     def validate_target_field(cls, v):
         """Validate target field is a known DefectDojo Finding field"""
@@ -120,8 +189,14 @@ class FieldMapping(BaseModel):
             'cvssv3_score', 'cvssv4', 'cvssv4_score', 'active', 'verified',
             'false_p', 'mitigation', 'impact', 'references', 'file_path',
             'line', 'unique_id_from_tool', 'component_name', 'component_version',
-            'static_finding', 'dynamic_finding', 'risk_accepted', 'out_of_scope'
+            'static_finding', 'dynamic_finding', 'risk_accepted', 'out_of_scope',
+            'is_mitigated'
         }
+
+        # Allow virtual/internal target fields (prefixed with _) without warning
+        # These are used for state_machine mappings where outputs go to multiple fields
+        if v.startswith('_'):
+            return v
 
         if v not in known_fields:
             # Warning, not error - allow custom fields
@@ -136,19 +211,33 @@ class FieldMapping(BaseModel):
     @root_validator(skip_on_failure=True)
     def validate_source_field_requirements(cls, values):
         """
-        Validate source field requirements based on data_type:
+        Validate source field requirements based on data_type and fixed_value:
 
+        - If fixed_value is set: no source_field/source_fields required
         - If data_type='template': template string required, no source_field/source_fields needed
         - Otherwise: EITHER source_field OR source_fields required (not both, not neither)
 
         This supports:
         1. Single source: source_field="Name"
         2. Priority chain: source_fields=["Name", "Plugin Name", "asset.name"]
+        3. Fixed constant: fixed_value="High" (no source needed)
         """
         data_type = values.get('data_type')
         template = values.get('template')
         source_field = values.get('source_field')
         source_fields = values.get('source_fields')
+        fixed_value = values.get('fixed_value')
+
+        # If fixed_value is set, no source fields are required
+        if fixed_value is not None:
+            # Warn if source_field/source_fields provided with fixed_value (they're ignored)
+            if source_field or source_fields:
+                import warnings
+                warnings.warn(
+                    "source_field/source_fields are ignored when fixed_value is set. "
+                    "The fixed_value will be used directly."
+                )
+            return values
 
         if data_type == 'template':
             # Template data type requires template string, not source fields

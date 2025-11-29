@@ -1,7 +1,7 @@
 # Universal Parser V2 - Parser Configuration Reference
 
-**Version**: 0.1.0 (PoC)
-**Last Updated**: October 14, 2025
+**Version**: 0.2.0 (PoC)
+**Last Updated**: November 28, 2025
 
 ## Overview
 
@@ -65,6 +65,19 @@ field_mappings:             # REQUIRED: List of field mappings
     date_format: string     # OPTIONAL for data_type: "date"
     default: string         # OPTIONAL: Default value if field missing
     template: string        # REQUIRED for data_type: "template"
+    fixed_value: any        # OPTIONAL: Hardcoded constant (ignores source_field)
+
+    # Conditional append rules
+    append_if_present:      # OPTIONAL: Build composite fields
+      - source_field: string
+        prefix: string
+
+    # State machine for status conversion
+    state_mapping:          # REQUIRED for data_type: "state_machine"
+      "input_state":
+        target_field: value
+      "default":            # OPTIONAL: Fallback for unmatched states
+        target_field: value
 
 # ===== DEDUPLICATION =====
 deduplication_fields:       # OPTIONAL: List of fields for deduplication
@@ -489,24 +502,32 @@ Type of data parser to use for this field.
 
 **Type**: String
 **Required**: Yes
-**Allowed Values**: `string`, `severity`
+**Allowed Values**: `string`, `severity`, `integer`, `boolean`, `date`, `template`, `state_machine`, `float`, `array`
 
 **Currently Implemented**:
 - `string` - String values (text, paths, descriptions)
 - `severity` - Severity normalization (Critical, High, Medium, Low, Info)
-
-**Planned for Future**:
 - `integer` - Integer values (line numbers, CWE IDs)
-- `float` - Floating point (CVSS scores)
 - `boolean` - Boolean values (active, verified)
 - `date` - Date values with format parsing
+- `template` - Multi-field composition with placeholders
+- `state_machine` - Convert single input to multiple output fields
+
+**Planned for Future**:
+- `float` - Floating point (CVSS scores)
 - `cve` - CVE identifier extraction
 - `cwe` - CWE identifier extraction and normalization
+- `array` - Array/list handling
 
 **Examples**:
 ```yaml
-data_type: "string"    # For text fields
-data_type: "severity"  # For severity with mapping
+data_type: "string"        # For text fields
+data_type: "severity"      # For severity with mapping
+data_type: "integer"       # For numeric fields
+data_type: "boolean"       # For true/false fields
+data_type: "date"          # For date fields
+data_type: "template"      # For multi-field composition
+data_type: "state_machine" # For status conversion
 ```
 
 ---
@@ -636,6 +657,109 @@ Default value to use if the source field is missing or null.
   default: "Medium"
   severity_mapping: {...}
 ```
+
+---
+
+#### `fixed_value` (Optional)
+
+Hardcoded constant value that ignores source fields. Useful for tools that only detect one type of vulnerability.
+
+**Type**: Any
+**Required**: No
+
+**When to Use**:
+- Tool always produces same severity (e.g., secret scanners → always High)
+- Tool always detects same CWE (e.g., Ggshield → CWE-798 Hardcoded Credentials)
+- Static metadata fields
+
+**Examples**:
+```yaml
+# Ggshield always detects hardcoded secrets
+field_mappings:
+  - target_field: "severity"
+    data_type: "string"
+    fixed_value: "High"
+
+  - target_field: "cwe"
+    data_type: "integer"
+    fixed_value: 798
+
+  - target_field: "static_finding"
+    data_type: "boolean"
+    fixed_value: true
+```
+
+**Note**: When `fixed_value` is set, `source_field` and `source_fields` are not required and are ignored if provided.
+
+---
+
+#### `append_if_present` (Optional)
+
+Build composite fields by conditionally appending sections based on field existence.
+
+**Type**: List of append rules
+**Required**: No
+
+**Rule Structure**:
+```yaml
+append_if_present:
+  - source_field: string   # Field path to check
+    prefix: string         # Text to prepend before the value
+```
+
+**Semantics**:
+1. Start with base value from `source_field`/`source_fields`
+2. For each append rule, if `source_field` exists and is non-empty:
+   - Append: `prefix` + `source_field_value`
+3. Return the composed string
+
+**Examples**:
+```yaml
+# Build description with optional target URL
+- source_field: "description"
+  target_field: "description"
+  data_type: "string"
+  append_if_present:
+    - source_field: "target"
+      prefix: "\n\n**Target:** "
+    - source_field: "evidence"
+      prefix: "\n\n**Evidence:** "
+```
+
+**Result Examples**:
+```
+# If target="https://example.com" and evidence="XSS payload detected":
+"SQL Injection in login form
+
+**Target:** https://example.com
+
+**Evidence:** XSS payload detected"
+
+# If target is null and evidence="XSS payload detected":
+"SQL Injection in login form
+
+**Evidence:** XSS payload detected"
+
+# If both are null:
+"SQL Injection in login form"
+```
+
+**Use Cases**:
+- Building rich descriptions with optional metadata
+- Appending URL/target information when available
+- Adding request/response data conditionally
+- Including evidence or proof when present
+
+---
+
+#### `state_mapping` (Required for state_machine)
+
+Mapping table for converting a single input state to multiple output fields.
+
+**Type**: Dictionary of state → field outputs
+**Required**: Yes (when `data_type: "state_machine"`)
+
+See [state_machine Data Type](#state_machine) for full documentation.
 
 ---
 
@@ -771,18 +895,246 @@ Severity normalization parser with mapping.
 
 ---
 
-### Future Data Types
-
-The following data types are planned for future implementation:
-
-#### integer (Planned)
+### integer
 
 Integer parser for numeric values.
 
-**Planned Use For**:
+**Use For**:
 - CWE IDs
 - Line numbers
 - Port numbers
+
+**Features**:
+- Converts string to integer
+- Handles null values
+- Returns None for non-numeric values
+
+**Example**:
+```yaml
+- source_field: "Classification.Cwe"
+  target_field: "cwe"
+  data_type: "integer"
+  active: true
+
+- source_field: "line_number"
+  target_field: "line"
+  data_type: "integer"
+  active: true
+```
+
+---
+
+### boolean
+
+Boolean parser for true/false values.
+
+**Use For**:
+- active
+- verified
+- false_p
+- static_finding
+- dynamic_finding
+
+**Features**:
+- Recognizes: true, false, 1, 0, "yes", "no" (case-insensitive)
+- Returns Python boolean
+- Handles null values
+
+**Example**:
+```yaml
+- source_field: "is_verified"
+  target_field: "verified"
+  data_type: "boolean"
+  active: true
+
+- target_field: "static_finding"
+  data_type: "boolean"
+  fixed_value: true
+```
+
+---
+
+### date
+
+Date parser with format support.
+
+**Use For**:
+- Finding date
+- Scan date
+- Discovery date
+
+**Features**:
+- Parses date strings using format specifier
+- Returns Python datetime object
+- Handles multiple formats
+
+**Configuration**:
+- `date_format` - Python strftime format string
+
+**Example**:
+```yaml
+- source_field: "discovered_at"
+  target_field: "date"
+  data_type: "date"
+  date_format: "%Y-%m-%d"
+  active: true
+
+- source_field: "scan_timestamp"
+  target_field: "date"
+  data_type: "date"
+  date_format: "%Y-%m-%dT%H:%M:%SZ"
+  active: true
+```
+
+**Common Formats**:
+```yaml
+date_format: "%Y-%m-%d"           # 2025-01-15
+date_format: "%m/%d/%Y"           # 01/15/2025
+date_format: "%Y-%m-%dT%H:%M:%SZ" # ISO 8601
+date_format: "%d-%b-%Y"           # 15-Jan-2025
+```
+
+---
+
+### template
+
+Multi-field composition using placeholder syntax.
+
+**Use For**:
+- Building titles from multiple fields
+- Composing descriptions with structured data
+- Creating unique identifiers from multiple sources
+
+**Features**:
+- Uses `{field_path}` placeholder syntax
+- Extracts values from multiple fields
+- Handles missing fields gracefully
+
+**Configuration**:
+- `template` - Template string with `{field_path}` placeholders
+- No `source_field` needed (fields extracted from template)
+
+**Example**:
+```yaml
+# Compose title from CVE and affected package
+- target_field: "title"
+  data_type: "template"
+  template: "{cve} affects {package_name} (version: {version})"
+  active: true
+
+# Build unique ID from multiple fields
+- target_field: "unique_id_from_tool"
+  data_type: "template"
+  template: "{scan_id}-{vuln_id}-{file_path}"
+  active: true
+```
+
+**Result Example**:
+```
+# If cve="CVE-2023-1234", package_name="log4j", version="2.14.0":
+"CVE-2023-1234 affects log4j (version: 2.14.0)"
+
+# If version is null:
+"CVE-2023-1234 affects log4j (version: )"
+```
+
+**Nested Fields**:
+```yaml
+template: "{vulnerability.id} in {component.name}"
+```
+
+---
+
+### state_machine
+
+Convert a single input state value to multiple output fields.
+
+**Use For**:
+- Trivy status → active, verified, is_mitigated
+- Tool-specific status codes → DefectDojo finding states
+- Any 1-to-many field conversion
+
+**Features**:
+- Maps input value to dictionary of output fields
+- Supports `default` fallback for unmatched states
+- Logs warning when no match found
+- Virtual target field (prefixed with `_`) for the mapping definition
+
+**Configuration**:
+- `data_type: "state_machine"` - Required
+- `target_field: "_status"` - Virtual field (prefixed with `_`)
+- `state_mapping` - Required mapping table
+
+**Structure**:
+```yaml
+state_mapping:
+  "input_value_1":
+    target_field_a: value
+    target_field_b: value
+  "input_value_2":
+    target_field_a: value
+    target_field_b: value
+  "default":           # Optional fallback
+    target_field_a: value
+    target_field_b: value
+```
+
+**Example - Trivy Status Mapping**:
+```yaml
+# Trivy uses status values: affected, fixed, not_affected, under_investigation
+- source_field: "status"
+  target_field: "_status"    # Virtual field (not saved directly)
+  data_type: "state_machine"
+  state_mapping:
+    "affected":
+      active: true
+      verified: false
+      is_mitigated: false
+    "fixed":
+      active: false
+      verified: true
+      is_mitigated: true
+    "not_affected":
+      active: false
+      verified: true
+      is_mitigated: true
+    "under_investigation":
+      active: true
+      verified: false
+      is_mitigated: false
+    "default":              # Fallback for unknown status
+      active: true
+      verified: false
+      is_mitigated: false
+```
+
+**How It Works**:
+1. Extract value from `source_field` (e.g., "fixed")
+2. Look up value in `state_mapping`
+3. If found, apply each key-value pair to the normalized finding
+4. If not found, use `default` mapping (if defined)
+5. If no match and no default, log warning and continue
+
+**Output**:
+```python
+# Input: {"status": "fixed", "title": "SQL Injection"}
+# Output finding:
+{
+    "title": "SQL Injection",
+    "active": False,
+    "verified": True,
+    "is_mitigated": True
+}
+```
+
+**Virtual Target Fields**:
+The `target_field` should start with `_` (underscore) to indicate it's a virtual field used for the state machine definition, not a real output field. The actual outputs are defined in `state_mapping`.
+
+---
+
+### Future Data Types
+
+The following data types are planned for future implementation:
 
 #### float (Planned)
 
@@ -791,24 +1143,6 @@ Floating-point parser.
 **Planned Use For**:
 - CVSS scores
 - Confidence scores
-
-#### boolean (Planned)
-
-Boolean parser.
-
-**Planned Use For**:
-- active
-- verified
-- false_p
-
-#### date (Planned)
-
-Date parser with format support.
-
-**Planned Use For**:
-- Finding date
-- Scan date
-- Discovery date
 
 #### cve (Planned)
 
@@ -823,6 +1157,15 @@ CWE identifier extractor and normalizer.
 
 **Planned Use For**:
 - CWE fields
+
+#### array (Planned)
+
+Array/list handler.
+
+**Planned Use For**:
+- Multiple CVEs
+- Tag lists
+- Reference lists
 
 ---
 
@@ -886,6 +1229,7 @@ These fields **must** be mapped and active:
 | `duplicate` | boolean | Finding is duplicate |
 | `out_of_scope` | boolean | Finding is out of scope |
 | `risk_accepted` | boolean | Risk has been accepted |
+| `is_mitigated` | boolean | Finding has been mitigated |
 
 #### Finding Type
 
@@ -1143,7 +1487,8 @@ xmllint --xpath "//vulnerability" scan.xml
 
 ---
 
-**Status**: PoC (Proof of Concept) - Day 7 Complete ✅
-**Branch**: `upV2-Poc`
+**Status**: PoC (Proof of Concept) - Conversation 1.3 Complete ✅
+**Branch**: `upV2-1.2-priority-chains`
 **Author**: T. Walker - DefectDojo
 **Created**: October 2025
+**Last Updated**: November 2025

@@ -149,11 +149,25 @@ class NormalizerService:
             if not field_mapping.active:
                 continue
 
+            # Handle fixed_value - use constant value, skip extraction
+            if field_mapping.fixed_value is not None:
+                normalized[field_mapping.target_field] = field_mapping.fixed_value
+                logger.debug(
+                    f"Using fixed_value '{field_mapping.fixed_value}' for "
+                    f"target '{field_mapping.target_field}'"
+                )
+                continue
+
             # Handle template data type specially - it needs access to all fields
             if field_mapping.data_type == 'template':
                 parsed_value = self._parse_template_field(raw_finding, field_mapping)
                 if parsed_value:
                     normalized[field_mapping.target_field] = parsed_value
+                continue
+
+            # Handle state_machine data type - maps input value to multiple outputs
+            if field_mapping.data_type == 'state_machine':
+                self._process_state_machine(raw_finding, field_mapping, normalized)
                 continue
 
             # Extract raw value using priority chain (source_fields) or single source
@@ -168,6 +182,12 @@ class NormalizerService:
 
             # Parse/transform the value
             parsed_value = self._parse_field_value(raw_value, field_mapping, matched_field)
+
+            # Apply conditional appends if configured
+            if field_mapping.append_if_present and parsed_value is not None:
+                parsed_value = self._apply_conditional_appends(
+                    parsed_value, raw_finding, field_mapping
+                )
 
             # Store in normalized finding
             normalized[field_mapping.target_field] = parsed_value
@@ -337,6 +357,156 @@ class NormalizerService:
                 f"Failed to parse template for {field_mapping.target_field}: {str(e)}"
             )
             return None
+
+    def _apply_conditional_appends(
+        self,
+        base_value: Any,
+        raw_finding: dict,
+        field_mapping: FieldMapping
+    ) -> str:
+        """
+        Apply conditional append rules to build composite field values.
+
+        For each rule in append_if_present, if the source field exists
+        and has a non-empty value, append prefix + value to the base value.
+
+        Args:
+            base_value: The base field value to append to
+            raw_finding: Raw finding dictionary from scan file
+            field_mapping: Field mapping with append_if_present configuration
+
+        Returns:
+            The base value with conditional appends applied
+
+        Example:
+            base_value: "SQL Injection vulnerability"
+            append_if_present:
+              - source_field: "target"
+                prefix: "\n**Target:** "
+              - source_field: "fix_version"
+                prefix: "\n**Fixed in:** "
+
+            If target="/api/users" and fix_version is null:
+            Result: "SQL Injection vulnerability\n**Target:** /api/users"
+        """
+        if not field_mapping.append_if_present:
+            return base_value
+
+        # Convert base value to string for appending
+        result = str(base_value) if base_value is not None else ""
+
+        for append_rule in field_mapping.append_if_present:
+            # Extract the source field value
+            append_value = FieldExtractor.extract(
+                raw_finding,
+                append_rule.source_field,
+                default=None
+            )
+
+            # Check if we have a valid (non-null, non-empty) value
+            if append_value is not None:
+                # For strings, also check if non-empty after stripping
+                if isinstance(append_value, str):
+                    if append_value.strip():
+                        result += append_rule.prefix + append_value
+                        logger.debug(
+                            f"Appended '{append_rule.source_field}' to "
+                            f"'{field_mapping.target_field}'"
+                        )
+                else:
+                    # Non-string values - convert to string and append
+                    result += append_rule.prefix + str(append_value)
+                    logger.debug(
+                        f"Appended '{append_rule.source_field}' to "
+                        f"'{field_mapping.target_field}'"
+                    )
+
+        return result
+
+    def _process_state_machine(
+        self,
+        raw_finding: dict,
+        field_mapping: FieldMapping,
+        normalized: dict
+    ) -> None:
+        """
+        Process a state machine mapping to set multiple output fields.
+
+        Looks up the input value in state_mapping and merges all output
+        field values into the normalized finding.
+
+        Args:
+            raw_finding: Raw finding dictionary from scan file
+            field_mapping: Field mapping with state_mapping configuration
+            normalized: Normalized finding dict (modified in place)
+
+        Example:
+            state_mapping:
+              "not_affected":
+                active: false
+                verified: true
+                is_mitigated: true
+              "false_positive":
+                false_p: true
+                active: false
+              default:
+                active: true
+
+            If source value is "not_affected", sets:
+            - normalized["active"] = False
+            - normalized["verified"] = True
+            - normalized["is_mitigated"] = True
+        """
+        if not field_mapping.state_mapping:
+            logger.warning(
+                f"state_machine mapping has no state_mapping for "
+                f"target '{field_mapping.target_field}'"
+            )
+            return
+
+        # Extract the input value using priority chain or source_field
+        raw_value, matched_field = self._extract_first_available(
+            raw_finding,
+            field_mapping
+        )
+
+        if raw_value is None:
+            logger.debug(
+                f"No source value found for state_machine "
+                f"'{field_mapping.target_field}'"
+            )
+            return
+
+        # Convert to string for lookup (state keys are strings)
+        input_state = str(raw_value)
+
+        # Look up the state in the mapping
+        if input_state in field_mapping.state_mapping:
+            outputs = field_mapping.state_mapping[input_state]
+            logger.debug(
+                f"State machine: '{input_state}' matched, setting {list(outputs.keys())}"
+            )
+        elif 'default' in field_mapping.state_mapping:
+            outputs = field_mapping.state_mapping['default']
+            logger.debug(
+                f"State machine: '{input_state}' not matched, using default, "
+                f"setting {list(outputs.keys())}"
+            )
+        else:
+            # No match and no default - log warning and skip
+            logger.warning(
+                f"State machine: '{input_state}' not found in state_mapping "
+                f"and no 'default' defined for '{field_mapping.target_field}'. "
+                f"Available states: {list(field_mapping.state_mapping.keys())}"
+            )
+            return
+
+        # Merge output values into normalized finding
+        for target_field, value in outputs.items():
+            normalized[target_field] = value
+            logger.debug(
+                f"State machine set: {target_field}={value}"
+            )
 
     def _add_metadata_fields(self, normalized: dict, raw_finding: dict):
         """
