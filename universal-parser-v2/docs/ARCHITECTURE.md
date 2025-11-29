@@ -3,13 +3,15 @@
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [System Architecture](#system-architecture)
-3. [Component Details](#component-details)
-4. [Data Flow](#data-flow)
-5. [Integration with DefectDojo](#integration-with-defectdojo)
-6. [Design Decisions](#design-decisions)
-7. [Security Considerations](#security-considerations)
-8. [Performance Considerations](#performance-considerations)
+2. [Technology Decisions](#technology-decisions)
+3. [System Architecture](#system-architecture)
+4. [Component Details](#component-details)
+5. [Data Flow](#data-flow)
+6. [Integration with DefectDojo](#integration-with-defectdojo)
+7. [Design Decisions](#design-decisions)
+8. [Security Considerations](#security-considerations)
+9. [Performance Considerations](#performance-considerations)
+10. [Future Enhancements](#future-enhancements)
 
 ## Overview
 
@@ -22,6 +24,156 @@ Universal Parser V2 is a microservice-based parser system that decouples securit
 - **Pluggable Architecture**: Easy to add new file formats and data types
 - **Pre-normalization**: Findings normalized before reaching DefectDojo
 - **Deduplication Integration**: Leverages DefectDojo's existing deduplication logic
+
+## Technology Decisions
+
+### Why Python (Not Go)?
+
+Universal Parser V2 is implemented in Python. This decision was made after careful consideration of both languages.
+
+#### Python Advantages (Current Choice)
+
+| Advantage | Why It Matters Here |
+|-----------|---------------------|
+| **DefectDojo ecosystem alignment** | DefectDojo is Django/Python - shared libraries, patterns, and contributor familiarity |
+| **Rich parsing libraries** | `jsonpath-ng`, `lxml`, `cvss`, `pydantic` - mature, battle-tested |
+| **Rapid prototyping** | YAML-driven parser configs benefit from Python's dynamic nature |
+| **Lower barrier to contribution** | More security engineers know Python than Go |
+| **Pydantic validation** | Declarative schema validation with excellent error messages |
+| **Existing parser patterns** | 200+ DefectDojo parsers are Python - code reuse potential |
+
+#### Go Advantages (Alternative Considered)
+
+| Advantage | Why It Would Matter |
+|-----------|---------------------|
+| **Performance** | 10-100x faster for CPU-bound parsing of large scan files |
+| **Memory efficiency** | Lower memory footprint per request |
+| **Single binary deployment** | No virtualenv, no pip dependencies |
+| **Concurrency** | Goroutines handle high-throughput scenarios better |
+| **Type safety at compile time** | Catches errors before runtime |
+
+#### Decision Rationale
+
+Python is the right choice for this microservice because:
+
+1. **I/O-bound workload**: Parsing logic is primarily I/O-bound (reading files), not CPU-bound. Python's async capabilities (FastAPI/uvicorn) handle this well.
+
+2. **Ecosystem integration**: Tight integration with DefectDojo's Python-based API client and existing parser patterns.
+
+3. **Development velocity**: The parser-as-code (YAML) approach requires frequent iteration. Python's dynamic nature accelerates this.
+
+4. **Contributor accessibility**: Security engineers who write YAML parser configs may also contribute to the microservice. Python has a lower barrier.
+
+#### Future Considerations
+
+**Go conversion remains possible** if these scenarios arise:
+- Processing thousands of large scan files per minute
+- Memory constraints in containerized environments
+- Desire for single-binary deployment
+
+Key insight: Tight integration with DefectDojo's API client is achievable in any language - the API is language-agnostic HTTP/JSON. The choice of Python is about the parsing implementation, not the API integration.
+
+### Separation of Concerns Architecture
+
+The microservice is designed with clear separation between three distinct phases:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         SEPARATION OF CONCERNS                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────┐     ┌──────────────────┐     ┌──────────────────────┐    │
+│  │   UPLOAD     │     │     PARSE        │     │    PUSH TO API       │    │
+│  │   PHASE      │────▶│     PHASE        │────▶│    PHASE             │    │
+│  └──────────────┘     └──────────────────┘     └──────────────────────┘    │
+│                                                                              │
+│  - Accept file        - Read file format      - Serialize findings         │
+│  - Load into memory   - Apply YAML config     - HTTP POST to DefectDojo    │
+│  - Validate YAML      - Transform data types  - Handle response            │
+│  - No parsing yet     - Normalize findings    - Return statistics          │
+│                       - Validate output                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Phase 1: Upload
+
+**Responsibility**: Accept and buffer the complete file before processing
+
+- Accept multipart file upload via HTTP POST
+- Load entire file into memory (supports large files)
+- Validate YAML configuration schema
+- No parsing occurs - file is held as raw bytes
+- Enables streaming uploads for very large files (future)
+
+**Why separate upload from parsing?**
+- Fail fast on malformed YAML before expensive parsing
+- Memory management: know full file size before allocating parser resources
+- Enables future async/queue-based processing (upload returns immediately, parse in background)
+
+#### Phase 2: Parse
+
+**Responsibility**: Transform raw scan data to normalized findings
+
+- Select appropriate file format reader (JSON, XML, CSV)
+- Apply YAML field mappings
+- Execute data type transformations (severity, date, CVSS, etc.)
+- Generate `unique_id_from_tool` for deduplication
+- Validate required fields (title, description, severity)
+- Output: List of normalized finding dictionaries
+
+**Why separate parsing from API push?**
+- Enables validation of all findings before any are sent
+- Batch processing: normalize 1000 findings, then send in one API call
+- Enables retry logic: if API fails, normalized data is preserved
+- Supports future local storage/caching of parsed results
+
+#### Phase 3: Push to API
+
+**Responsibility**: Deliver normalized findings to DefectDojo
+
+- Serialize findings to JSON
+- HTTP POST to `/api/v2/universal-parser-v2/reimport-scan/`
+- Handle authentication (API token)
+- Process response (created, closed, reactivated counts)
+- Error handling and retry logic
+
+**Why separate API push?**
+- Different failure modes (network vs parsing errors)
+- Enables batching strategies (chunk large finding sets)
+- Supports multiple destinations (future: multiple DefectDojo instances)
+- API client can be replaced without touching parsing logic
+
+#### Large File Handling
+
+A key use case is handling large scan files:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         LARGE FILE WORKFLOW                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  1. Client uploads 500MB Nessus scan file                                   │
+│     ↓                                                                        │
+│  2. FastAPI receives entire file into memory                                │
+│     (configurable limit, default 100MB, can increase)                       │
+│     ↓                                                                        │
+│  3. File held as bytes - no parsing until upload complete                   │
+│     ↓                                                                        │
+│  4. JSONReader/XMLReader parses entire file at once                         │
+│     (streaming parser support planned for future)                           │
+│     ↓                                                                        │
+│  5. All findings normalized in memory                                       │
+│     ↓                                                                        │
+│  6. Single HTTP POST with all findings to DefectDojo                        │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+This architecture enables:
+- **Predictable memory usage**: Know file size before parsing starts
+- **Atomic operations**: Either all findings import or none do
+- **Simple error handling**: One failure point per phase
+- **Future optimization**: Each phase can be independently optimized
 
 ## System Architecture
 
@@ -192,32 +344,81 @@ class FileFormatReader(ABC):
 
 **Purpose**: Transform raw values to DefectDojo-compatible formats
 
-**Implementations**:
+**Available Parsers**:
+
+| Parser | Data Type | Purpose |
+|--------|-----------|---------|
+| `StringParser` | `string` | Pass-through with whitespace trimming |
+| `SeverityParser` | `severity` | Normalize to Critical/High/Medium/Low/Info |
+| `DateParser` | `date` | Convert to YYYY-MM-DD format |
+| `IntegerParser` | `integer` | Safe integer conversion |
+| `BooleanParser` | `boolean` | Convert to true/false |
+| `FloatParser` | `float` | Safe float conversion |
+| `ArrayParser` | `array` | Handle list/array values |
+| `TemplateParser` | `template` | Multi-field string composition |
+| `CVSSExtractorParser` | `cvss_extractor` | CVSS vector extraction with priority fallback |
 
 #### SeverityParser
 - Normalizes severity values to: Critical, High, Medium, Low, Info
-- Supports custom mapping tables
-- Handles numeric and string inputs
+- Supports custom mapping tables in YAML
+- Handles numeric (1-5) and string inputs
 
 #### DateParser
 - Converts various date formats to YYYY-MM-DD
 - Handles ISO 8601, Unix timestamps, custom formats
-
-#### CVEParser
-- Extracts CVE identifiers (CVE-YYYY-NNNNN)
-- Validates format
-
-#### CWEParser
-- Extracts CWE numbers
-- Validates against CWE database
+- Configurable via `date_format` in YAML
 
 #### IntegerParser
 - Safe integer conversion
-- Handles null/empty values
+- Handles null/empty values gracefully
+- Used for CWE numbers, line numbers, etc.
 
 #### BooleanParser
 - Converts string/numeric to boolean
-- Handles common formats (true/false, yes/no, 1/0)
+- Handles common formats: true/false, yes/no, 1/0, on/off
+
+#### FloatParser
+- Safe float conversion
+- Used for CVSS scores and similar decimal values
+
+#### TemplateParser
+- Composes output from multiple source fields
+- Template syntax: `"{field1} - {field2}"`
+- Supports nested field paths: `"{vuln.name} ({vuln.id})"`
+
+#### CVSSExtractorParser
+Advanced parser for CVSS (Common Vulnerability Scoring System) data:
+
+**Capabilities**:
+1. **Multi-source priority extraction**: Try multiple paths until valid CVSS found
+   ```yaml
+   cvss_sources:
+     - path: "Classification.Cvss31.Vector"    # Try CVSS 3.1 first
+       score_path: "Classification.Cvss31.Score"
+     - path: "Classification.Cvss.Vector"      # Fallback to CVSS 3.0
+       score_path: "Classification.Cvss.Score"
+   ```
+
+2. **Vector reconstruction**: Build CVSS vector from individual components
+   ```yaml
+   cvss_reconstruct:
+     version: "3.1"
+     components:
+       attackVector: "cvssV3.attackVector"
+       attackComplexity: "cvssV3.attackComplexity"
+       privilegesRequired: "cvssV3.privilegesRequired"
+       # ... other CVSS metrics
+     score_path: "cvssV3.baseScore"
+   ```
+
+3. **Dual output**: Extracts both vector string and score
+   ```yaml
+   cvss_outputs:
+     cvssv3: "cvssv3"           # Target for vector string
+     cvssv3_score: "cvssv3_score"  # Target for score (if provided)
+   ```
+
+**Validation**: Uses the `cvss` Python library (same as DefectDojo) to validate vectors.
 
 **Interface**:
 ```python
@@ -626,4 +827,4 @@ Universal Parser V2 uses existing models:
 
 **Author**: T. Walker - DefectDojo
 **Created**: October 2025
-**Last Updated**: October 2025
+**Last Updated**: November 2025

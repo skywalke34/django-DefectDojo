@@ -8,6 +8,75 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, validator, root_validator
 
 
+class CVSSSource(BaseModel):
+    """
+    Single CVSS source definition for priority extraction.
+
+    Used to define where to extract CVSS vector string and optionally score
+    from the source data. Multiple sources can be defined with priority order.
+
+    Example:
+        cvss_sources:
+          - path: "Classification.Cvss31.Vector"
+            score_path: "Classification.Cvss31.Score"
+          - path: "Classification.Cvss.Vector"
+            score_path: "Classification.Cvss.Score"
+    """
+    path: str = Field(
+        ...,
+        description="Field path to CVSS vector string (e.g., 'cvss.vectorString')"
+    )
+    score_path: Optional[str] = Field(
+        default=None,
+        description="Optional field path to CVSS score. Only extract if source provides it."
+    )
+
+
+class CVSSReconstruct(BaseModel):
+    """
+    Configuration for reconstructing CVSS vector from individual component fields.
+
+    Used when the source data provides CVSS metrics as separate fields rather than
+    a complete vector string (e.g., Dependency-Check XML format).
+
+    Example:
+        cvss_reconstruct:
+          version: "3.1"
+          components:
+            attackVector: "cvssV3.attackVector"
+            attackComplexity: "cvssV3.attackComplexity"
+            privilegesRequired: "cvssV3.privilegesRequired"
+            userInteraction: "cvssV3.userInteraction"
+            scope: "cvssV3.scope"
+            confidentialityImpact: "cvssV3.confidentialityImpact"
+            integrityImpact: "cvssV3.integrityImpact"
+            availabilityImpact: "cvssV3.availabilityImpact"
+          score_path: "cvssV3.baseScore"
+    """
+    version: str = Field(
+        default="3.1",
+        description="CVSS version to use in reconstructed vector ('3.0' or '3.1')"
+    )
+    components: Dict[str, str] = Field(
+        ...,
+        description="Mapping of CVSS metric names to source field paths. "
+                    "Required metrics: attackVector, attackComplexity, privilegesRequired, "
+                    "userInteraction, scope, confidentialityImpact, integrityImpact, availabilityImpact"
+    )
+    score_path: Optional[str] = Field(
+        default=None,
+        description="Optional field path to CVSS score. Only extract if source provides it."
+    )
+
+    @validator('version')
+    def validate_version(cls, v):
+        """Ensure CVSS version is valid"""
+        allowed = ['3.0', '3.1']
+        if v not in allowed:
+            raise ValueError(f"CVSS version must be one of {allowed}, got '{v}'")
+        return v
+
+
 class ConditionalAppend(BaseModel):
     """
     Defines a conditional append rule for building fields with optional sections.
@@ -126,10 +195,30 @@ class FieldMapping(BaseModel):
                     "Example: state_mapping: {'not_affected': {'active': false, 'is_mitigated': true}}"
     )
 
+    # Optional: CVSS extractor configuration
+    cvss_sources: Optional[List[CVSSSource]] = Field(
+        default=None,
+        description="Priority-ordered list of CVSS source paths for direct extraction. "
+                    "Each source defines 'path' to vector string and optional 'score_path'. "
+                    "Used when data_type='cvss_extractor'."
+    )
+    cvss_reconstruct: Optional[CVSSReconstruct] = Field(
+        default=None,
+        description="Configuration for reconstructing CVSS vector from individual component fields. "
+                    "Used when source provides metrics as separate fields (e.g., Dependency-Check). "
+                    "Used when data_type='cvss_extractor'."
+    )
+    cvss_outputs: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Mapping of CVSS output names to target DefectDojo fields. "
+                    "Keys: 'cvssv3' (vector string), 'cvssv3_score' (float). "
+                    "Example: {'cvssv3': 'cvssv3', 'cvssv3_score': 'cvssv3_score'}"
+    )
+
     @validator('data_type')
     def validate_data_type(cls, v):
         """Ensure data type is supported"""
-        allowed = ['string', 'severity', 'date', 'integer', 'boolean', 'float', 'array', 'template', 'state_machine']
+        allowed = ['string', 'severity', 'date', 'integer', 'boolean', 'float', 'array', 'template', 'state_machine', 'cvss_extractor']
         if v not in allowed:
             raise ValueError(
                 f"data_type must be one of {allowed}, got '{v}'"
@@ -215,12 +304,14 @@ class FieldMapping(BaseModel):
 
         - If fixed_value is set: no source_field/source_fields required
         - If data_type='template': template string required, no source_field/source_fields needed
+        - If data_type='cvss_extractor': uses cvss_sources/cvss_reconstruct instead
         - Otherwise: EITHER source_field OR source_fields required (not both, not neither)
 
         This supports:
         1. Single source: source_field="Name"
         2. Priority chain: source_fields=["Name", "Plugin Name", "asset.name"]
         3. Fixed constant: fixed_value="High" (no source needed)
+        4. CVSS extraction: cvss_sources or cvss_reconstruct (no source_field needed)
         """
         data_type = values.get('data_type')
         template = values.get('template')
@@ -252,6 +343,26 @@ class FieldMapping(BaseModel):
                 warnings.warn(
                     "source_field/source_fields are ignored when data_type='template'. "
                     "Template extracts fields from the template string placeholders."
+                )
+        elif data_type == 'cvss_extractor':
+            # CVSS extractor uses cvss_sources/cvss_reconstruct instead of source_field
+            cvss_sources = values.get('cvss_sources')
+            cvss_reconstruct = values.get('cvss_reconstruct')
+
+            # Validate at least one CVSS configuration is provided
+            if not cvss_sources and not cvss_reconstruct:
+                raise ValueError(
+                    "cvss_extractor requires at least one of 'cvss_sources' or 'cvss_reconstruct'. "
+                    "Use 'cvss_sources' for direct vector extraction or 'cvss_reconstruct' "
+                    "to build vector from individual component fields."
+                )
+
+            # Warn if source_field/source_fields provided (they're ignored)
+            if source_field or source_fields:
+                import warnings
+                warnings.warn(
+                    "source_field/source_fields are ignored when data_type='cvss_extractor'. "
+                    "CVSS extractor uses cvss_sources and/or cvss_reconstruct for configuration."
                 )
         else:
             # For all other data_types, need either source_field OR source_fields

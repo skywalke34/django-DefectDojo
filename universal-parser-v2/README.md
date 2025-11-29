@@ -11,7 +11,13 @@ Universal Parser V2 is a microservice-based parser system for DefectDojo that al
 - **Parser-as-Code**: Define parsers using declarative YAML configuration
 - **Multiple File Formats**: JSON, XML, CSV support built-in
 - **Field Extraction**: JSONPath, XPath, and column-based extraction
-- **Data Type Transformation**: Automatic conversion (severity, dates, CVE, CWE, etc.)
+- **Data Type Transformation**: Automatic conversion (severity, dates, integers, floats, booleans)
+- **Priority Chains**: Try multiple source fields until one has a value
+- **Template Strings**: Compose fields from multiple sources (`"{cve} - {name}"`)
+- **CVSS Extraction**: Multi-source priority extraction with vector reconstruction
+- **State Machine Mapping**: Map single input to multiple output fields
+- **Conditional Append**: Build composite fields with optional sections
+- **Fixed Values**: Set constant values for fields (e.g., `static_finding: false`)
 - **Severity Normalization**: Map tool-specific severities to DefectDojo standard
 - **Deduplication Ready**: Generates unique IDs for DefectDojo's deduplication
 - **Pre-normalized Findings**: Sends structured data directly to DefectDojo
@@ -65,28 +71,34 @@ Universal Parser V2 is a microservice-based parser system for DefectDojo that al
 
 ## 📊 Project Status
 
-**✅ Days 1-6 Complete** - Core implementation finished!
+**✅ Milestones 1-3 Complete** - Core implementation + Advanced Transformers finished!
 
-| Component | Status | Tests |
-|-----------|--------|-------|
-| Microservice (FastAPI) | ✅ Complete | 47 passing |
-| YAML Validation (Pydantic) | ✅ Complete | Included |
-| File Parsers (JSON/XML/CSV) | ✅ Complete | 22 tests |
-| Data Type Parsers | ✅ Complete | Included |
-| Normalizer Service | ✅ Complete | 11 tests |
-| DefectDojo API Endpoint | ✅ Complete | - |
-| UniversalV2ReImporter | ✅ Complete | 11 tests |
-| DefectDojo API Client | ✅ Complete | 4 tests |
-| Integration Tests | ✅ Complete | 10 tests |
+| Component | Status | Description |
+|-----------|--------|-------------|
+| Microservice (FastAPI) | ✅ Complete | File upload, YAML validation, API |
+| YAML Validation (Pydantic) | ✅ Complete | Schema validation with detailed errors |
+| File Parsers (JSON/XML/CSV) | ✅ Complete | JSONPath, XPath, column extraction |
+| Data Type Parsers (9 types) | ✅ Complete | string, severity, date, integer, boolean, float, array, template, cvss_extractor |
+| Priority Chain Extraction | ✅ Complete | Try multiple source fields |
+| Template String Parser | ✅ Complete | Multi-field composition |
+| CVSS Extractor | ✅ Complete | Priority extraction + vector reconstruction |
+| State Machine Mapping | ✅ Complete | Single input → multiple outputs |
+| Conditional Append | ✅ Complete | Build composite fields |
+| Fixed Values | ✅ Complete | Constant field values |
+| Normalizer Service | ✅ Complete | End-to-end normalization |
+| DefectDojo API Client | ✅ Complete | Async HTTP with retry |
+| DefectDojo API Endpoint | ✅ Complete | Pre-normalized findings import |
 
-**Next Steps**: Documentation, end-to-end testing, deployment
+**Total: 194 tests passing ✅**
+
+**Next Steps**: XML/CSV format readers, additional parser configs
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
 - Python 3.12+
-- DefectDojo instance running (with upV2-Poc branch)
+- DefectDojo instance running
 - Virtual environment (recommended)
 
 ### Installation
@@ -199,20 +211,34 @@ curl -X POST "http://localhost:8000/api/v1/parse" \
 python -m pytest tests/ -v --cov=app --cov-report=html
 
 # Run specific test suites
-python -m pytest tests/test_parsers.py -v          # Parser tests (22)
-python -m pytest tests/test_normalizer.py -v       # Normalizer tests (11)
-python -m pytest tests/test_integration.py -v      # Integration tests (10)
-python -m pytest tests/test_defectdojo_client.py -v  # Client tests (4)
+python -m pytest tests/test_parsers.py -v              # File format parsers
+python -m pytest tests/test_normalizer.py -v           # Normalizer tests
+python -m pytest tests/test_integration.py -v          # Integration tests
+python -m pytest tests/test_template_parser.py -v      # Template strings
+python -m pytest tests/test_priority_chains.py -v      # Priority chains
+python -m pytest tests/test_cvss_extractor.py -v       # CVSS extraction
+python -m pytest tests/test_state_machine.py -v        # State machine
+python -m pytest tests/test_conditional_append.py -v   # Conditional append
+python -m pytest tests/test_fixed_value.py -v          # Fixed values
+python -m pytest tests/test_defectdojo_client.py -v    # API client
 ```
 
 ### Current Test Coverage
 
-- **Parsers**: 22 tests - File format readers and data type parsers
-- **Normalizer**: 11 tests - End-to-end normalization flow
-- **Integration**: 10 tests - Complete parser-to-findings flow
-- **Client**: 4 tests - DefectDojo API client
+| Test Suite | Tests | Coverage |
+|------------|-------|----------|
+| File Format Parsers | 22 | JSON, XML, CSV readers |
+| Normalizer | 11 | End-to-end normalization |
+| Integration | 10 | Complete parser-to-findings flow |
+| Template Parser | 18 | Multi-field composition |
+| Priority Chains | 24 | Alternative field extraction |
+| CVSS Extractor | 30 | Vector extraction & reconstruction |
+| State Machine | 32 | Multi-output mapping |
+| Conditional Append | 28 | Composite field building |
+| Fixed Values | 15 | Constant field values |
+| API Client | 4 | DefectDojo HTTP client |
 
-**Total: 47 tests passing ✅**
+**Total: 194 tests passing ✅**
 
 ## 📋 Project Structure
 
@@ -228,33 +254,43 @@ universal-parser-v2/
 │   │   │   ├── json_reader.py
 │   │   │   ├── xml_reader.py
 │   │   │   └── csv_reader.py
-│   │   └── data_types/            # Type converters
+│   │   └── data_types/            # Type converters (9 parsers)
 │   │       ├── string_parser.py
 │   │       ├── severity_parser.py
 │   │       ├── date_parser.py
 │   │       ├── integer_parser.py
 │   │       ├── boolean_parser.py
-│   │       ├── cve_parser.py
-│   │       └── cwe_parser.py
+│   │       ├── float_parser.py
+│   │       ├── array_parser.py
+│   │       ├── template_parser.py   # Multi-field composition
+│   │       └── cvss_extractor.py    # CVSS vector extraction
 │   ├── services/
 │   │   └── normalizer.py          # Main normalization orchestrator
 │   ├── clients/
 │   │   └── defectdojo_client.py   # DefectDojo API client
 │   └── utils/
+│       ├── checksum.py            # Hash generation
 │       └── errors.py              # Custom exceptions
 ├── configs/
 │   └── acunetix360_json.yaml      # Example parser configuration
 ├── tests/
-│   ├── test_parsers.py            # Parser unit tests
+│   ├── test_parsers.py            # File format parser tests
 │   ├── test_normalizer.py         # Normalizer tests
 │   ├── test_integration.py        # Integration tests
-│   ├── test_defectdojo_client.py  # Client tests
+│   ├── test_defectdojo_client.py  # API client tests
+│   ├── test_template_parser.py    # Template string tests
+│   ├── test_priority_chains.py    # Priority chain tests
+│   ├── test_fixed_value.py        # Fixed value tests
+│   ├── test_state_machine.py      # State machine tests
+│   ├── test_conditional_append.py # Conditional append tests
+│   ├── test_cvss_extractor.py     # CVSS extractor tests
 │   └── fixtures/                  # Test scan files
 │       └── acunetix_sample.json
 ├── docs/
-│   ├── ARCHITECTURE.md            # Architecture documentation
+│   ├── ARCHITECTURE.md            # Architecture & technology decisions
 │   ├── API.md                     # API reference
 │   ├── DEPLOYMENT.md              # Deployment guide
+│   ├── PARSER_CONFIG.md           # YAML configuration reference
 │   └── USAGE.md                   # Usage examples
 ├── requirements.txt               # Python dependencies
 ├── test_setup.sh                  # Test setup script
@@ -333,7 +369,7 @@ More examples can be added easily - just create a YAML file!
 **4. Connection refused to DefectDojo**
 - **Solution**: Verify DefectDojo is running and accessible
 - Check API token is valid: `curl -H "Authorization: Token YOUR_TOKEN" https://dd.com/api/v2/users/`
-- Ensure the upV2-Poc branch is deployed
+- Ensure DefectDojo has the Universal Parser V2 API endpoint
 
 **5. Tests fail with "No module named pytest"**
 - **Solution**: Activate virtual environment: `source venv/bin/activate`
@@ -341,32 +377,39 @@ More examples can be added easily - just create a YAML file!
 
 ## 🚀 Roadmap
 
-### Completed (Days 1-6)
+### Milestone 1: Core Infrastructure ✅
 
 - ✅ FastAPI microservice with file upload
 - ✅ YAML schema validation (Pydantic)
-- ✅ JSON/XML/CSV file format parsers
-- ✅ Data type parsers (string, severity, date, integer, etc.)
+- ✅ JSON file format parser with JSONPath
+- ✅ Basic data type parsers (string, severity, date, integer, boolean)
 - ✅ Normalizer service with validation
 - ✅ DefectDojo API endpoint (`/api/v2/universal-parser-v2/reimport-scan/`)
-- ✅ UniversalV2ReImporter class with deduplication
 - ✅ DefectDojo API client in microservice
-- ✅ Comprehensive test suite (47 tests)
 
-### In Progress (Day 7)
+### Milestone 2: Field Extraction Patterns ✅
 
-- 📝 Architecture documentation
-- 📝 API documentation
-- 📝 Deployment guide
-- 📝 Usage examples
+- ✅ Priority chain extraction (try multiple source fields)
+- ✅ Template string parser (multi-field composition)
+- ✅ Fixed value support (constant field values)
+- ✅ State machine mapping (single input → multiple outputs)
+- ✅ Conditional append (build composite fields)
 
-### Upcoming (Days 8-10)
+### Milestone 3: Advanced Transformers ✅
 
-- End-to-end testing
-- Error scenario testing
-- Docker Compose setup
-- Production deployment guide
-- Demo video/walkthrough
+- ✅ CVSS extractor with multi-source priority
+- ✅ CVSS vector reconstruction from components
+- ✅ Float parser for scores
+- ✅ Array parser for list values
+- ✅ Comprehensive test suite (194 tests)
+
+### Upcoming
+
+- XML format reader (XPath extraction)
+- CSV format reader (column-based extraction)
+- Additional parser configurations (Nessus, Burp, etc.)
+- Docker Compose setup for microservice
+- End-to-end testing with live DefectDojo
 
 ## 📄 License
 
@@ -386,12 +429,12 @@ This project is part of DefectDojo and follows the same BSD-3-Clause license.
 
 ---
 
-**Status**: PoC (Proof of Concept) - Days 1-6 Complete ✅
+**Status**: Active Development - Milestones 1-3 Complete ✅
 
-**Branch**: `upV2-Poc`
+**Branch**: `upV2-1.2-priority-chains`
 
 **Author**: T. Walker - DefectDojo
 
 **Created**: October 2025
 
-**Last Updated**: October 2025
+**Last Updated**: November 2025

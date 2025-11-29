@@ -170,6 +170,11 @@ class NormalizerService:
                 self._process_state_machine(raw_finding, field_mapping, normalized)
                 continue
 
+            # Handle cvss_extractor data type - extracts CVSS to multiple fields
+            if field_mapping.data_type == 'cvss_extractor':
+                self._process_cvss_extractor(raw_finding, field_mapping, normalized)
+                continue
+
             # Extract raw value using priority chain (source_fields) or single source
             raw_value, matched_field = self._extract_first_available(
                 raw_finding,
@@ -507,6 +512,96 @@ class NormalizerService:
             logger.debug(
                 f"State machine set: {target_field}={value}"
             )
+
+    def _process_cvss_extractor(
+        self,
+        raw_finding: dict,
+        field_mapping: FieldMapping,
+        normalized: dict
+    ) -> None:
+        """
+        Process a CVSS extractor mapping to extract CVSS data to multiple output fields.
+
+        Extracts CVSS vector string and optionally score from source data using either
+        direct extraction (cvss_sources) or reconstruction from components (cvss_reconstruct).
+
+        Args:
+            raw_finding: Raw finding dictionary from scan file
+            field_mapping: Field mapping with CVSS extractor configuration
+            normalized: Normalized finding dict (modified in place)
+
+        Example:
+            cvss_sources:
+              - path: "Classification.Cvss31.Vector"
+                score_path: "Classification.Cvss31.Score"
+            cvss_outputs:
+              cvssv3: "cvssv3"
+              cvssv3_score: "cvssv3_score"
+
+            Result:
+            - normalized["cvssv3"] = "CVSS:3.1/AV:N/AC:L/..."
+            - normalized["cvssv3_score"] = 9.8
+        """
+        # Build config for CVSS parser
+        parser_config = {}
+
+        # Add cvss_sources configuration
+        if field_mapping.cvss_sources:
+            parser_config['cvss_sources'] = [
+                {
+                    'path': source.path,
+                    'score_path': source.score_path
+                }
+                for source in field_mapping.cvss_sources
+            ]
+
+        # Add cvss_reconstruct configuration
+        if field_mapping.cvss_reconstruct:
+            parser_config['cvss_reconstruct'] = {
+                'version': field_mapping.cvss_reconstruct.version,
+                'components': field_mapping.cvss_reconstruct.components,
+                'score_path': field_mapping.cvss_reconstruct.score_path
+            }
+
+        if not parser_config:
+            logger.warning(
+                f"cvss_extractor mapping has no cvss_sources or cvss_reconstruct "
+                f"for target '{field_mapping.target_field}'"
+            )
+            return
+
+        # Get the CVSS parser
+        try:
+            parser = get_parser('cvss_extractor')
+        except ValueError as e:
+            logger.warning(f"CVSS extractor parser not available: {str(e)}")
+            return
+
+        # Parse CVSS data (pass entire raw finding for multi-source extraction)
+        try:
+            cvss_result = parser.parse(raw_finding, parser_config)
+        except Exception as e:
+            logger.warning(
+                f"Failed to extract CVSS for '{field_mapping.target_field}': {str(e)}"
+            )
+            return
+
+        if not cvss_result or not isinstance(cvss_result, dict):
+            logger.debug(f"No CVSS data extracted for '{field_mapping.target_field}'")
+            return
+
+        # Distribute outputs based on cvss_outputs configuration
+        cvss_outputs = field_mapping.cvss_outputs or {
+            'cvssv3': 'cvssv3',
+            'cvssv3_score': 'cvssv3_score'
+        }
+
+        for output_key, target_field in cvss_outputs.items():
+            if output_key in cvss_result and cvss_result[output_key] is not None:
+                normalized[target_field] = cvss_result[output_key]
+                logger.debug(
+                    f"CVSS extractor set: {target_field}={cvss_result[output_key]}"
+                )
 
     def _add_metadata_fields(self, normalized: dict, raw_finding: dict):
         """

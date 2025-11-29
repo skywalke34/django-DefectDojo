@@ -52,27 +52,37 @@ field_mappings:
       "Info": "Info"
       "Informational": "Info"
 
-  # OPTIONAL FIELDS (MVP: commented out for simplicity)
-  # Uncomment and add more field mappings as needed:
+  # OPTIONAL FIELDS
+  # Uncomment and set active: true to enable additional field mappings
 
-  # # CWE (Common Weakness Enumeration)
-  # - source_field: "Classification.Cwe"
-  #   target_field: "cwe"
-  #   data_type: "integer"
-  #   active: false
+  # CWE (Common Weakness Enumeration)
+  - source_field: "Classification.Cwe"
+    target_field: "cwe"
+    data_type: "integer"
+    active: false
 
-  # # Date the vulnerability was first seen
-  # - source_field: "FirstSeenDate"
-  #   target_field: "date"
-  #   data_type: "date"
-  #   active: false
-  #   date_format: "%d/%m/%Y %I:%M %p"  # e.g., "16/06/2021 12:30 PM"
+  # Date the vulnerability was first seen
+  - source_field: "FirstSeenDate"
+    target_field: "date"
+    data_type: "date"
+    active: false
+    date_format: "%d/%m/%Y %I:%M %p"  # e.g., "16/06/2021 12:30 PM"
 
-  # # CVSS v3 Vector
-  # - source_field: "Classification.Cvss.Vector"
-  #   target_field: "cvssv3"
-  #   data_type: "string"
-  #   active: false
+  # CVSS Extractor - extracts CVSS vector and score with priority fallback
+  # Priority: CVSS 3.1 → CVSS 3.0 (tries each source until valid CVSS found)
+  - target_field: "_cvss"
+    data_type: "cvss_extractor"
+    active: true
+    cvss_sources:
+      # First try CVSS 3.1 (preferred)
+      - path: "Classification.Cvss31.Vector"
+        score_path: "Classification.Cvss31.Score"
+      # Fallback to CVSS 3.0
+      - path: "Classification.Cvss.Vector"
+        score_path: "Classification.Cvss.Score"
+    cvss_outputs:
+      cvssv3: "cvssv3"
+      cvssv3_score: "cvssv3_score"
 
   # # Mitigation advice
   # - source_field: "RemedialProcedure"
