@@ -15,6 +15,7 @@ Author: DefectDojo Team
 License: BSD-3-Clause
 """
 
+from datetime import date
 from fastapi import FastAPI, File, UploadFile, Form, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -22,7 +23,9 @@ from fastapi.staticfiles import StaticFiles
 import logging
 
 from app.validators.yaml_validator import YAMLValidator
-from app.utils.errors import YAMLValidationError
+from app.services.normalizer import NormalizerService
+from app.clients.defectdojo_client import DefectDojoClient
+from app.utils.errors import YAMLValidationError, DefectDojoAPIError, ValidationError
 
 # Configure logging
 logging.basicConfig(
@@ -142,7 +145,12 @@ async def import_scan(
     test_id: int = Form(None, description="Existing Test ID for reimport"),
     product_name: str = Form(None, description="Product name (for auto-create)"),
     engagement_name: str = Form(None, description="Engagement name (for auto-create)"),
-    test_title: str = Form(None, description="Test title (for auto-create)")
+    test_title: str = Form(None, description="Test title (for auto-create)"),
+    scan_date: str = Form(None, description="Scan date (YYYY-MM-DD, defaults to today)"),
+    close_old_findings: bool = Form(True, description="Close findings not in scan"),
+    verified: bool = Form(False, description="Mark new findings as verified"),
+    active: bool = Form(True, description="Mark new findings as active"),
+    version: str = Form(None, description="Version string for the test")
 ):
     """
     Import scan file into DefectDojo using YAML configuration.
@@ -162,6 +170,11 @@ async def import_scan(
         product_name: Product name (for auto-create)
         engagement_name: Engagement name (for auto-create)
         test_title: Test title (for auto-create)
+        scan_date: Scan date in YYYY-MM-DD format (defaults to today)
+        close_old_findings: Close findings not present in scan (default: True)
+        verified: Mark new findings as verified (default: False)
+        active: Mark new findings as active (default: True)
+        version: Version string for the test
 
     Returns:
         dict: Import results with statistics
@@ -204,19 +217,64 @@ async def import_scan(
         logger.info("Step 3: Reading scan file")
         scan_content = await scan_file.read()
 
-        # TODO: Step 4: Parse scan file (will implement in Day 2)
-        logger.warning("Step 4: Parsing not yet implemented - returning stub response")
+        # Step 4: Parse and normalize scan file
+        logger.info("Step 4: Parsing and normalizing scan file")
+        normalizer = NormalizerService(config)
+        findings = normalizer.normalize(scan_content)
+        logger.info(f"Parsed {len(findings)} findings from scan file")
 
-        # TODO: Step 5: Normalize findings (will implement in Day 3)
-        logger.warning("Step 5: Normalization not yet implemented")
+        # Step 5: Connect to DefectDojo and get/create test
+        logger.info("Step 5: Connecting to DefectDojo")
+        effective_scan_date = scan_date or date.today().isoformat()
 
-        # TODO: Step 6: Send to DefectDojo API (will implement in Day 6)
-        logger.warning("Step 6: DefectDojo API integration not yet implemented")
+        async with DefectDojoClient(
+            base_url=defectdojo_url,
+            api_token=defectdojo_api_token
+        ) as client:
+            # Get or create test if test_id not provided
+            if not test_id:
+                logger.info("Creating product/engagement/test structure")
+                # Create/find product
+                product = await client.find_or_create_product(name=product_name)
 
-        # Return stub response for now
+                # Create/find engagement
+                engagement = await client.find_or_create_engagement(
+                    product_id=product["id"],
+                    name=engagement_name,
+                    target_start=effective_scan_date,
+                    target_end=effective_scan_date
+                )
+
+                # Create/find test
+                effective_test_title = test_title or f"{config.tool_name} Scan"
+                test = await client.find_or_create_test(
+                    engagement_id=engagement["id"],
+                    test_type_name=config.tool_type,
+                    title=effective_test_title,
+                    target_start=effective_scan_date,
+                    target_end=effective_scan_date
+                )
+                test_id = test["id"]
+                logger.info(f"Using test ID: {test_id}")
+
+            # Step 6: Send findings to DefectDojo
+            logger.info(f"Step 6: Sending {len(findings)} findings to DefectDojo")
+            result = await client.universal_parser_v2_reimport(
+                test_id=test_id,
+                findings=findings,
+                scan_date=effective_scan_date,
+                close_old_findings=close_old_findings,
+                verified=verified,
+                active=active,
+                version=version
+            )
+
+        # Extract import statistics
+        import_stats = result.get("test_import_finding_action", {})
+
         return {
             "status": "success",
-            "message": "Import completed successfully (STUB IMPLEMENTATION)",
+            "message": "Import completed successfully",
             "config": {
                 "parser_name": config.parser_name,
                 "parser_version": config.parser_version,
@@ -234,12 +292,13 @@ async def import_scan(
                 "engagement_name": engagement_name
             },
             "results": {
-                "findings_parsed": 0,  # TODO: Implement
-                "findings_created": 0,  # TODO: Implement
-                "findings_updated": 0,  # TODO: Implement
-                "findings_closed": 0   # TODO: Implement
-            },
-            "note": "This is a stub response. Full implementation in progress."
+                "findings_parsed": len(findings),
+                "findings_created": import_stats.get("created", 0),
+                "findings_updated": import_stats.get("updated", 0),
+                "findings_closed": import_stats.get("closed", 0),
+                "findings_reactivated": import_stats.get("reactivated", 0),
+                "findings_untouched": import_stats.get("untouched", 0)
+            }
         }
 
     except YAMLValidationError as e:
@@ -248,11 +307,127 @@ async def import_scan(
             status_code=400,
             detail=YAMLValidator.format_validation_errors(e)
         )
+    except ValidationError as e:
+        logger.warning(f"Validation error: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "Validation Error",
+                "message": str(e),
+                "type": "validation_error"
+            }
+        )
+    except DefectDojoAPIError as e:
+        logger.error(f"DefectDojo API error: {str(e)}")
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "DefectDojo API Error",
+                "message": str(e),
+                "type": "api_error",
+                "status_code": e.status_code
+            }
+        )
     except HTTPException:
         # Re-raise HTTP exceptions without modification
         raise
     except Exception as e:
         logger.error(f"Unexpected error during import: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Internal Server Error",
+                "message": f"An unexpected error occurred: {str(e)}",
+                "type": "internal_error"
+            }
+        )
+
+
+@app.post("/api/parse")
+async def parse_scan(
+    scan_file: UploadFile = File(..., description="Security scan report file"),
+    yaml_file: UploadFile = File(..., description="YAML configuration file"),
+    limit: int = Form(None, description="Limit number of findings returned (for debugging)")
+):
+    """
+    Parse scan file and return normalized findings without sending to DefectDojo.
+
+    This endpoint is useful for testing YAML configurations and debugging
+    field mappings before performing actual imports.
+
+    Args:
+        scan_file: Security scan report (JSON/XML/CSV)
+        yaml_file: YAML parser configuration
+        limit: Optional limit on number of findings to return
+
+    Returns:
+        dict: Parsed findings and statistics
+
+    Example:
+        curl -X POST http://localhost:8000/api/parse \\
+          -F "scan_file=@acunetix_scan.json" \\
+          -F "yaml_file=@acunetix360_json.yaml" \\
+          -F "limit=5"
+    """
+    logger.info(f"Parse request received: scan_file={scan_file.filename}, yaml_file={yaml_file.filename}")
+
+    try:
+        # Step 1: Validate YAML configuration
+        yaml_content = await yaml_file.read()
+        yaml_str = yaml_content.decode('utf-8')
+
+        config, checksum = YAMLValidator.validate_with_checksum(yaml_str)
+        logger.info(f"YAML validation successful: {config.parser_name}")
+
+        # Step 2: Read and parse scan file
+        scan_content = await scan_file.read()
+        normalizer = NormalizerService(config)
+        findings = normalizer.normalize(scan_content)
+        logger.info(f"Parsed {len(findings)} findings")
+
+        # Apply limit if specified
+        returned_findings = findings[:limit] if limit else findings
+
+        return {
+            "status": "success",
+            "config": {
+                "parser_name": config.parser_name,
+                "parser_version": config.parser_version,
+                "tool_name": config.tool_name,
+                "tool_type": config.tool_type,
+                "file_format": config.file_format,
+                "yaml_checksum": checksum
+            },
+            "scan_file": {
+                "filename": scan_file.filename,
+                "size_bytes": len(scan_content)
+            },
+            "statistics": {
+                "total_findings": len(findings),
+                "returned_findings": len(returned_findings),
+                "limited": limit is not None and limit < len(findings)
+            },
+            "findings": returned_findings
+        }
+
+    except YAMLValidationError as e:
+        logger.warning(f"YAML validation failed: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=YAMLValidator.format_validation_errors(e)
+        )
+    except ValidationError as e:
+        logger.warning(f"Validation error: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "Validation Error",
+                "message": str(e),
+                "type": "validation_error"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error during parse: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={

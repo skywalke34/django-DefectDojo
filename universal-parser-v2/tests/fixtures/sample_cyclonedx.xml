@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bom xmlns="http://cyclonedx.org/schema/bom/1.4" version="1">
+  <vulnerabilities>
+    <vulnerability ref="CVE-2021-44228">
+      <id>CVE-2021-44228</id>
+      <source>
+        <name>NVD</name>
+      </source>
+      <description>Apache Log4j2 Remote Code Execution Vulnerability</description>
+      <ratings>
+        <rating>
+          <score>10.0</score>
+          <severity>critical</severity>
+          <method>CVSSv31</method>
+          <vector>CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H</vector>
+        </rating>
+      </ratings>
+      <cwes>
+        <cwe>502</cwe>
+      </cwes>
+      <recommendation>Upgrade to Log4j 2.17.0 or later</recommendation>
+    </vulnerability>
+    <vulnerability ref="CVE-2022-22965">
+      <id>CVE-2022-22965</id>
+      <source>
+        <name>NVD</name>
+      </source>
+      <description>Spring Framework RCE via Data Binding</description>
+      <ratings>
+        <rating>
+          <score>9.8</score>
+          <severity>critical</severity>
+          <method>CVSSv31</method>
+          <vector>CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H</vector>
+        </rating>
+      </ratings>
+      <cwes>
+        <cwe>94</cwe>
+      </cwes>
+      <recommendation>Upgrade Spring Framework to 5.3.18 or later</recommendation>
+    </vulnerability>
+  </vulnerabilities>
+</bom>

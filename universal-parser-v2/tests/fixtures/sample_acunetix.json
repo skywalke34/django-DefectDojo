@@ -1,0 +1,42 @@
+{
+  "Vulnerabilities": [
+    {
+      "Name": "SQL Injection",
+      "Description": "SQL Injection vulnerability found in login form",
+      "Severity": "Critical",
+      "Classification": {
+        "Cwe": 89,
+        "Cvss31": {
+          "Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+          "Score": 10.0
+        }
+      },
+      "FirstSeenDate": "16/06/2021 12:30 PM",
+      "LookupId": "vuln-001"
+    },
+    {
+      "Name": "Cross-Site Scripting (XSS)",
+      "Description": "Reflected XSS vulnerability in search parameter",
+      "Severity": "High",
+      "Classification": {
+        "Cwe": 79,
+        "Cvss31": {
+          "Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+          "Score": 6.1
+        }
+      },
+      "FirstSeenDate": "17/06/2021 09:15 AM",
+      "LookupId": "vuln-002"
+    },
+    {
+      "Name": "Missing Security Headers",
+      "Description": "X-Content-Type-Options header is not set",
+      "Severity": "Info",
+      "Classification": {
+        "Cwe": 16
+      },
+      "FirstSeenDate": "17/06/2021 09:16 AM",
+      "LookupId": "vuln-003"
+    }
+  ]
+}

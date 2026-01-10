@@ -1,0 +1,79 @@
+# Universal Parser V2 - Docker Compose Configuration
+#
+# Usage:
+#   Development:  docker compose up
+#   Production:   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Environment variables can be set in .env file or passed directly
+#
+# Port Configuration:
+#   - UPV2 uses port 8500 by default (to avoid conflict with DefectDojo on 8080)
+#   - Dev mode uses port 8501
+
+services:
+  universal-parser-v2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: defectdojo/universal-parser-v2:latest
+    container_name: universal-parser-v2
+    ports:
+      - "${UPV2_PORT:-8500}:8000"
+    environment:
+      # Service configuration
+      - UPV2_HOST=0.0.0.0
+      - UPV2_PORT=8000
+      - UPV2_LOG_LEVEL=${UPV2_LOG_LEVEL:-info}
+      - UPV2_WORKERS=${UPV2_WORKERS:-4}
+      # DefectDojo connection (optional defaults)
+      - DEFECTDOJO_URL=${DEFECTDOJO_URL:-}
+      - DEFECTDOJO_API_TOKEN=${DEFECTDOJO_API_TOKEN:-}
+    volumes:
+      # Mount configs directory for YAML parser configurations
+      - ./configs:/app/configs:ro
+      # Development: mount source for hot-reload
+      - ./app:/app/app:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - upv2-network
+
+  # Development service with hot-reload
+  universal-parser-v2-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: defectdojo/universal-parser-v2:dev
+    container_name: universal-parser-v2-dev
+    ports:
+      - "${UPV2_DEV_PORT:-8501}:8000"
+    environment:
+      - UPV2_HOST=0.0.0.0
+      - UPV2_PORT=8000
+      - UPV2_LOG_LEVEL=debug
+      - UPV2_WORKERS=1
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./app:/app/app
+      - ./tests:/app/tests:ro
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--log-level", "debug"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: "no"
+    networks:
+      - upv2-network
+    profiles:
+      - dev
+
+networks:
+  upv2-network:
+    driver: bridge

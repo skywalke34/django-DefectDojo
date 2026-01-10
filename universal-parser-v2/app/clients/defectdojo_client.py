@@ -416,6 +416,254 @@ class DefectDojoClient:
                 message=f"HTTP request failed: {str(e)}"
             )
 
+    async def find_or_create_product(
+        self,
+        name: str,
+        prod_type: int = 1,
+        description: str = "Created by Universal Parser V2"
+    ) -> dict[str, Any]:
+        """
+        Find existing product by name or create a new one.
+
+        Args:
+            name: Product name
+            prod_type: Product type ID (default: 1)
+            description: Product description
+
+        Returns:
+            Product dictionary with 'id' and 'name'
+
+        Raises:
+            DefectDojoAPIError: If API call fails
+        """
+        # First, search for existing product
+        search_url = f"{self.base_url}/api/v2/products/"
+        params = {"name": name}
+
+        try:
+            response = await self.client.get(search_url, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("count", 0) > 0:
+                    product = data["results"][0]
+                    logger.info(f"Found existing product: {product['name']} (id={product['id']})")
+                    return product
+
+            # Product not found, create it
+            create_url = f"{self.base_url}/api/v2/products/"
+            payload = {
+                "name": name,
+                "prod_type": prod_type,
+                "description": description
+            }
+            response = await self.client.post(create_url, json=payload)
+
+            if response.status_code not in (200, 201):
+                error_message = self._extract_error_message(response)
+                raise DefectDojoAPIError(
+                    status_code=response.status_code,
+                    message=f"Failed to create product: {error_message}"
+                )
+
+            product = response.json()
+            logger.info(f"Created new product: {product['name']} (id={product['id']})")
+            return product
+
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error in find_or_create_product: {str(e)}")
+            raise DefectDojoAPIError(
+                status_code=0,
+                message=f"HTTP request failed: {str(e)}"
+            )
+
+    async def find_or_create_engagement(
+        self,
+        product_id: int,
+        name: str,
+        target_start: str,
+        target_end: str,
+        engagement_type: str = "CI/CD",
+        status: str = "In Progress",
+        description: str = "Created by Universal Parser V2"
+    ) -> dict[str, Any]:
+        """
+        Find existing engagement by name or create a new one.
+
+        Args:
+            product_id: Product ID to associate engagement with
+            name: Engagement name
+            target_start: Start date (YYYY-MM-DD)
+            target_end: End date (YYYY-MM-DD)
+            engagement_type: Type of engagement (default: CI/CD)
+            status: Engagement status (default: In Progress)
+            description: Engagement description
+
+        Returns:
+            Engagement dictionary with 'id' and 'name'
+
+        Raises:
+            DefectDojoAPIError: If API call fails
+        """
+        # Search for existing engagement
+        search_url = f"{self.base_url}/api/v2/engagements/"
+        params = {"product": product_id, "name": name}
+
+        try:
+            response = await self.client.get(search_url, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("count", 0) > 0:
+                    engagement = data["results"][0]
+                    logger.info(f"Found existing engagement: {engagement['name']} (id={engagement['id']})")
+                    return engagement
+
+            # Engagement not found, create it
+            create_url = f"{self.base_url}/api/v2/engagements/"
+            payload = {
+                "product": product_id,
+                "name": name,
+                "target_start": target_start,
+                "target_end": target_end,
+                "engagement_type": engagement_type,
+                "status": status,
+                "description": description
+            }
+            response = await self.client.post(create_url, json=payload)
+
+            if response.status_code not in (200, 201):
+                error_message = self._extract_error_message(response)
+                raise DefectDojoAPIError(
+                    status_code=response.status_code,
+                    message=f"Failed to create engagement: {error_message}"
+                )
+
+            engagement = response.json()
+            logger.info(f"Created new engagement: {engagement['name']} (id={engagement['id']})")
+            return engagement
+
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error in find_or_create_engagement: {str(e)}")
+            raise DefectDojoAPIError(
+                status_code=0,
+                message=f"HTTP request failed: {str(e)}"
+            )
+
+    async def find_or_create_test(
+        self,
+        engagement_id: int,
+        test_type_name: str,
+        title: str,
+        target_start: str,
+        target_end: str,
+        description: str = "Created by Universal Parser V2"
+    ) -> dict[str, Any]:
+        """
+        Find existing test by title or create a new one.
+
+        Args:
+            engagement_id: Engagement ID to associate test with
+            test_type_name: Test type name (e.g., "Acunetix 360 Scan")
+            title: Test title
+            target_start: Start date (YYYY-MM-DD)
+            target_end: End date (YYYY-MM-DD)
+            description: Test description
+
+        Returns:
+            Test dictionary with 'id' and 'title'
+
+        Raises:
+            DefectDojoAPIError: If API call fails
+        """
+        # First get or create the test type
+        test_type_id = await self._get_or_create_test_type(test_type_name)
+
+        # Search for existing test
+        search_url = f"{self.base_url}/api/v2/tests/"
+        params = {"engagement": engagement_id, "title": title}
+
+        try:
+            response = await self.client.get(search_url, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("count", 0) > 0:
+                    test = data["results"][0]
+                    logger.info(f"Found existing test: {test['title']} (id={test['id']})")
+                    return test
+
+            # Test not found, create it
+            create_url = f"{self.base_url}/api/v2/tests/"
+            payload = {
+                "engagement": engagement_id,
+                "test_type": test_type_id,
+                "title": title,
+                "target_start": target_start,
+                "target_end": target_end,
+                "description": description
+            }
+            response = await self.client.post(create_url, json=payload)
+
+            if response.status_code not in (200, 201):
+                error_message = self._extract_error_message(response)
+                raise DefectDojoAPIError(
+                    status_code=response.status_code,
+                    message=f"Failed to create test: {error_message}"
+                )
+
+            test = response.json()
+            logger.info(f"Created new test: {test['title']} (id={test['id']})")
+            return test
+
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error in find_or_create_test: {str(e)}")
+            raise DefectDojoAPIError(
+                status_code=0,
+                message=f"HTTP request failed: {str(e)}"
+            )
+
+    async def _get_or_create_test_type(self, name: str) -> int:
+        """
+        Get test type ID by name, or create if it doesn't exist.
+
+        Args:
+            name: Test type name
+
+        Returns:
+            Test type ID
+
+        Raises:
+            DefectDojoAPIError: If API call fails
+        """
+        search_url = f"{self.base_url}/api/v2/test_types/"
+        params = {"name": name}
+
+        try:
+            response = await self.client.get(search_url, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("count", 0) > 0:
+                    return data["results"][0]["id"]
+
+            # Test type not found, create it
+            create_url = f"{self.base_url}/api/v2/test_types/"
+            payload = {"name": name}
+            response = await self.client.post(create_url, json=payload)
+
+            if response.status_code not in (200, 201):
+                error_message = self._extract_error_message(response)
+                raise DefectDojoAPIError(
+                    status_code=response.status_code,
+                    message=f"Failed to create test type: {error_message}"
+                )
+
+            return response.json()["id"]
+
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error in _get_or_create_test_type: {str(e)}")
+            raise DefectDojoAPIError(
+                status_code=0,
+                message=f"HTTP request failed: {str(e)}"
+            )
+
     async def close(self):
         """Close the HTTP client connection."""
         await self.client.aclose()
