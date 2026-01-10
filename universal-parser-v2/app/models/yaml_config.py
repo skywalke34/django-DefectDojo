@@ -77,6 +77,218 @@ class CVSSReconstruct(BaseModel):
         return v
 
 
+class RequestResponseMapping(BaseModel):
+    """
+    Configuration for mapping request/response pairs to DefectDojo's unsaved_req_resp format.
+
+    DAST tools often capture HTTP request/response pairs for each finding.
+    DefectDojo stores these in the `unsaved_req_resp` field as a list of dicts.
+
+    Supports three modes:
+    1. Separate fields: request_field + response_field
+    2. Combined field: combined_field (dict with request/response keys)
+    3. Array field: array_field (list of request/response pairs)
+
+    Example YAML configs:
+        # Mode 1: Separate fields
+        request_response_mapping:
+          request_field: "raw_request"
+          response_field: "raw_response"
+
+        # Mode 2: Combined field (dict)
+        request_response_mapping:
+          combined_field: "http_exchange"
+          request_key: "req"
+          response_key: "resp"
+
+        # Mode 3: Array of pairs
+        request_response_mapping:
+          array_field: "http_messages"
+          request_key: "request"
+          response_key: "response"
+
+    Output format (DefectDojo):
+        unsaved_req_resp = [
+            {"req": "GET /api/...", "resp": "HTTP/1.1 200..."},
+            ...
+        ]
+    """
+    # Mode 1: Separate request/response fields
+    request_field: Optional[str] = Field(
+        default=None,
+        description="Field path to HTTP request data"
+    )
+    response_field: Optional[str] = Field(
+        default=None,
+        description="Field path to HTTP response data"
+    )
+
+    # Mode 2/3: Combined or array field
+    combined_field: Optional[str] = Field(
+        default=None,
+        description="Field path to combined request/response dict or array"
+    )
+    array_field: Optional[str] = Field(
+        default=None,
+        description="Field path to array of request/response pairs"
+    )
+
+    # Keys within combined/array objects
+    request_key: str = Field(
+        default="request",
+        description="Key name for request in combined/array mode"
+    )
+    response_key: str = Field(
+        default="response",
+        description="Key name for response in combined/array mode"
+    )
+
+    @root_validator(skip_on_failure=True)
+    def validate_mapping_mode(cls, values):
+        """Ensure exactly one mapping mode is configured"""
+        request_field = values.get('request_field')
+        response_field = values.get('response_field')
+        combined_field = values.get('combined_field')
+        array_field = values.get('array_field')
+
+        # Check separate mode (both request and response)
+        has_separate = request_field is not None or response_field is not None
+        has_combined = combined_field is not None
+        has_array = array_field is not None
+
+        mode_count = sum([has_separate, has_combined, has_array])
+
+        if mode_count == 0:
+            raise ValueError(
+                "RequestResponseMapping requires one of: "
+                "(request_field + response_field), combined_field, or array_field"
+            )
+
+        if mode_count > 1:
+            raise ValueError(
+                "RequestResponseMapping supports only one mode: "
+                "separate (request_field + response_field), combined, or array"
+            )
+
+        # If using separate mode, both fields should be provided
+        if has_separate and not (request_field and response_field):
+            raise ValueError(
+                "Separate mode requires both request_field and response_field"
+            )
+
+        return values
+
+
+class ConditionalSeverity(BaseModel):
+    """
+    Defines a conditional severity rule for dynamic severity assignment.
+
+    Allows severity to be determined based on field values. Used for tools
+    that don't have explicit severity but where severity can be inferred
+    (e.g., TruffleHog: AWS credentials = Critical, generic secrets = Medium).
+
+    Example:
+        conditional_severity:
+          - source_field: "detector_name"
+            condition: "contains"
+            value: "AWS"
+            severity: "Critical"
+          - source_field: "detector_name"
+            condition: "equals"
+            value: "Generic Secret"
+            severity: "Medium"
+        default_severity: "High"
+    """
+    source_field: str = Field(
+        ...,
+        description="Field path to check for condition"
+    )
+    condition: str = Field(
+        ...,
+        description="Condition type: 'equals', 'contains', 'regex', 'in'"
+    )
+    value: Any = Field(
+        ...,
+        description="Value to compare against. String for equals/contains/regex, list for 'in'"
+    )
+    severity: str = Field(
+        ...,
+        description="Severity to assign if condition matches"
+    )
+
+    @validator('condition')
+    def validate_condition(cls, v):
+        """Ensure condition type is valid"""
+        allowed = ['equals', 'contains', 'regex', 'in', 'starts_with', 'ends_with']
+        if v not in allowed:
+            raise ValueError(f"condition must be one of {allowed}, got '{v}'")
+        return v
+
+    @validator('severity')
+    def validate_severity(cls, v):
+        """Ensure severity is valid DefectDojo severity"""
+        valid = {'Critical', 'High', 'Medium', 'Low', 'Info'}
+        if v not in valid:
+            raise ValueError(f"severity must be one of {valid}, got '{v}'")
+        return v
+
+
+class VersionDetection(BaseModel):
+    """
+    Configuration for detecting a specific format version.
+
+    Version detection checks if certain conditions are met to identify
+    which version of a file format is being parsed.
+
+    Detection methods:
+    - field_exists: Check if a field exists in the data
+    - field_equals: Check if a field has a specific value
+    - field_contains: Check if a field contains a specific string
+    - field_matches: Check if a field matches a regex pattern
+
+    Example:
+        detection:
+          field_exists: "DetectorName"  # TruffleHog v3
+        # OR
+        detection:
+          field_equals:
+            path: "version"
+            value: "2.0"
+    """
+    field_exists: Optional[str] = Field(
+        default=None,
+        description="Field path that must exist for this version"
+    )
+    field_equals: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Dict with 'path' and 'value' for exact match detection"
+    )
+    field_contains: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Dict with 'path' and 'value' for contains detection"
+    )
+    field_matches: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Dict with 'path' and 'pattern' for regex detection"
+    )
+
+    @root_validator(skip_on_failure=True)
+    def validate_detection_method(cls, values):
+        """Ensure at least one detection method is specified"""
+        methods = [
+            values.get('field_exists'),
+            values.get('field_equals'),
+            values.get('field_contains'),
+            values.get('field_matches')
+        ]
+        if not any(methods):
+            raise ValueError(
+                "VersionDetection requires at least one detection method: "
+                "field_exists, field_equals, field_contains, or field_matches"
+            )
+        return values
+
+
 class ConditionalAppend(BaseModel):
     """
     Defines a conditional append rule for building fields with optional sections.
@@ -215,10 +427,40 @@ class FieldMapping(BaseModel):
                     "Example: {'cvssv3': 'cvssv3', 'cvssv3_score': 'cvssv3_score'}"
     )
 
+    # Optional: Conditional severity rules (for data_type='conditional_severity')
+    conditional_severity: Optional[List[ConditionalSeverity]] = Field(
+        default=None,
+        description="List of conditional severity rules. First matching rule wins. "
+                    "Used when data_type='conditional_severity'."
+    )
+    default_severity: Optional[str] = Field(
+        default=None,
+        description="Default severity if no conditional_severity rule matches. "
+                    "Required when using data_type='conditional_severity'."
+    )
+
+    # Optional: Regex parser configuration
+    pattern: Optional[str] = Field(
+        default=None,
+        description="Regex pattern for extraction. Used when data_type='regex'."
+    )
+    regex_group: Optional[Any] = Field(
+        default=None,
+        description="Regex capture group (number or name). Used when data_type='regex'."
+    )
+    match_mode: Optional[str] = Field(
+        default=None,
+        description="Regex match mode: 'first', 'last', 'all', 'join'. Used when data_type='regex'."
+    )
+
     @validator('data_type')
     def validate_data_type(cls, v):
         """Ensure data type is supported"""
-        allowed = ['string', 'severity', 'date', 'integer', 'boolean', 'float', 'array', 'template', 'state_machine', 'cvss_extractor']
+        allowed = [
+            'string', 'severity', 'date', 'integer', 'boolean', 'float', 'array',
+            'template', 'state_machine', 'cvss_extractor',
+            'html_to_text', 'endpoint', 'cwe', 'regex', 'conditional_severity'
+        ]
         if v not in allowed:
             raise ValueError(
                 f"data_type must be one of {allowed}, got '{v}'"
@@ -279,7 +521,7 @@ class FieldMapping(BaseModel):
             'false_p', 'mitigation', 'impact', 'references', 'file_path',
             'line', 'unique_id_from_tool', 'component_name', 'component_version',
             'static_finding', 'dynamic_finding', 'risk_accepted', 'out_of_scope',
-            'is_mitigated'
+            'is_mitigated', 'unsaved_req_resp', 'unsaved_endpoints', 'nb_occurences'
         }
 
         # Allow virtual/internal target fields (prefixed with _) without warning
@@ -364,6 +606,30 @@ class FieldMapping(BaseModel):
                     "source_field/source_fields are ignored when data_type='cvss_extractor'. "
                     "CVSS extractor uses cvss_sources and/or cvss_reconstruct for configuration."
                 )
+        elif data_type == 'conditional_severity':
+            # Conditional severity requires conditional_severity rules and default
+            conditional_severity = values.get('conditional_severity')
+            default_severity = values.get('default_severity')
+
+            if not conditional_severity:
+                raise ValueError(
+                    "conditional_severity requires 'conditional_severity' list of rules. "
+                    "Each rule specifies a condition and the severity to assign when matched."
+                )
+
+            if not default_severity:
+                raise ValueError(
+                    "conditional_severity requires 'default_severity' as fallback. "
+                    "This severity is used when no conditional rules match."
+                )
+
+            # Warn if source_field/source_fields provided (they're ignored)
+            if source_field or source_fields:
+                import warnings
+                warnings.warn(
+                    "source_field/source_fields are ignored when data_type='conditional_severity'. "
+                    "Conditional severity uses the conditional_severity rules configuration."
+                )
         else:
             # For all other data_types, need either source_field OR source_fields
             has_source_field = source_field is not None and source_field != ""
@@ -407,6 +673,52 @@ class FieldMapping(BaseModel):
             return [self.source_field]
         else:
             return []
+
+
+class FormatVersion(BaseModel):
+    """
+    Defines a format version with its detection rules and field mappings.
+
+    Used when a single tool can output multiple file format versions
+    (e.g., TruffleHog v2 vs v3, Semgrep 0.x vs 1.x).
+
+    The detection rules determine which version matches a given scan file,
+    and the field_mappings are used for that version.
+
+    Example YAML:
+        format_versions:
+          - version: "v3"
+            detection:
+              field_exists: "DetectorName"
+            field_mappings:
+              - source_field: "DetectorName"
+                target_field: "title"
+                data_type: "string"
+
+          - version: "v2"
+            detection:
+              field_exists: "reason"
+            field_mappings:
+              - source_field: "reason"
+                target_field: "title"
+                data_type: "string"
+    """
+    version: str = Field(
+        ...,
+        description="Version identifier (e.g., 'v2', 'v3', '1.0')"
+    )
+    detection: VersionDetection = Field(
+        ...,
+        description="Rules to detect this version"
+    )
+    field_mappings: List[FieldMapping] = Field(
+        ...,
+        description="Field mappings specific to this version"
+    )
+    json_root_path: Optional[str] = Field(
+        default=None,
+        description="Version-specific JSON root path (overrides top-level)"
+    )
 
 
 class YAMLConfig(BaseModel):
@@ -474,16 +786,31 @@ class YAMLConfig(BaseModel):
         description="CSV quote character (default: '\"')"
     )
 
-    # Field Mappings
-    field_mappings: List[FieldMapping] = Field(
-        ...,
-        description="List of source field → target field mappings"
+    # Field Mappings (required unless format_versions is provided)
+    field_mappings: Optional[List[FieldMapping]] = Field(
+        default=None,
+        description="List of source field → target field mappings. "
+                    "Required unless format_versions is provided."
+    )
+
+    # Format Version Detection (alternative to field_mappings)
+    format_versions: Optional[List[FormatVersion]] = Field(
+        default=None,
+        description="List of format versions with detection rules and version-specific mappings. "
+                    "Used when a tool can output multiple file format versions."
     )
 
     # Deduplication
     deduplication_fields: List[str] = Field(
         default_factory=list,
         description="List of DefectDojo fields to use for deduplication"
+    )
+
+    # Request/Response handling (for DAST tools)
+    request_response_mapping: Optional[RequestResponseMapping] = Field(
+        default=None,
+        description="Configuration for extracting HTTP request/response pairs from findings. "
+                    "Populates the DefectDojo 'unsaved_req_resp' field."
     )
 
     @validator('file_format')
@@ -527,6 +854,10 @@ class YAMLConfig(BaseModel):
     @validator('field_mappings')
     def validate_required_fields(cls, v):
         """Ensure required DefectDojo fields are mapped and active"""
+        if v is None:
+            # Will be validated by root_validator with format_versions
+            return v
+
         required_fields = ['title', 'description', 'severity']
         active_targets = {
             mapping.target_field
@@ -550,7 +881,12 @@ class YAMLConfig(BaseModel):
             # Default to title if not specified
             return ['title']
 
-        field_mappings = values.get('field_mappings', [])
+        # Skip validation if format_versions is used (mappings will vary by version)
+        format_versions = values.get('format_versions')
+        if format_versions:
+            return v
+
+        field_mappings = values.get('field_mappings') or []
         active_targets = {
             mapping.target_field
             for mapping in field_mappings
@@ -566,12 +902,52 @@ class YAMLConfig(BaseModel):
 
         return v
 
+    @root_validator(skip_on_failure=True)
+    def validate_mappings_or_versions(cls, values):
+        """Ensure either field_mappings or format_versions is provided"""
+        field_mappings = values.get('field_mappings')
+        format_versions = values.get('format_versions')
+
+        if not field_mappings and not format_versions:
+            raise ValueError(
+                "Either 'field_mappings' or 'format_versions' must be provided. "
+                "Use 'field_mappings' for single-version formats, or 'format_versions' "
+                "for tools that output multiple file format versions."
+            )
+
+        if field_mappings and format_versions:
+            raise ValueError(
+                "Cannot specify both 'field_mappings' and 'format_versions'. "
+                "Use 'field_mappings' alone for single-version formats, or "
+                "'format_versions' alone for multi-version detection."
+            )
+
+        # Validate required fields in each format_version
+        if format_versions:
+            required_fields = ['title', 'description', 'severity']
+            for fv in format_versions:
+                active_targets = {
+                    m.target_field for m in fv.field_mappings if m.active
+                }
+                missing = [f for f in required_fields if f not in active_targets]
+                if missing:
+                    raise ValueError(
+                        f"Format version '{fv.version}' is missing required fields: {missing}. "
+                        f"Each version must have mappings for: {required_fields}"
+                    )
+
+        return values
+
     def get_active_field_mappings(self) -> List[FieldMapping]:
         """Return only active field mappings"""
-        return [mapping for mapping in self.field_mappings if mapping.active]
+        if self.field_mappings:
+            return [mapping for mapping in self.field_mappings if mapping.active]
+        return []
 
     def get_field_mapping(self, target_field: str) -> Optional[FieldMapping]:
         """Get field mapping by target field name"""
+        if not self.field_mappings:
+            return None
         for mapping in self.field_mappings:
             if mapping.target_field == target_field and mapping.active:
                 return mapping

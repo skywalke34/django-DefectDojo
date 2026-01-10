@@ -13,7 +13,10 @@ This service:
 import logging
 from typing import Any
 
-from app.models.yaml_config import YAMLConfig, FieldMapping
+from app.models.yaml_config import (
+    YAMLConfig, FieldMapping, RequestResponseMapping,
+    FormatVersion, VersionDetection
+)
 from app.parsers.file_formats import get_reader
 from app.parsers.data_types import get_parser
 from app.parsers.base import FieldExtractor
@@ -69,6 +72,122 @@ class NormalizerService:
             logger.error(f"Failed to initialize reader: {str(e)}")
             raise
 
+    def _detect_format_version(self, sample_finding: dict) -> FormatVersion | None:
+        """
+        Detect which format version matches the sample finding.
+
+        Tries each format_version's detection rules in order.
+        Returns the first matching version.
+
+        Args:
+            sample_finding: A sample finding to test detection rules against
+
+        Returns:
+            Matching FormatVersion or None if no match
+        """
+        import re
+
+        if not self.config.format_versions:
+            return None
+
+        for fv in self.config.format_versions:
+            detection = fv.detection
+
+            # field_exists: Check if field path exists and has a value
+            if detection.field_exists:
+                value = FieldExtractor.extract(
+                    sample_finding, detection.field_exists, default=None
+                )
+                if value is not None:
+                    logger.info(
+                        f"Detected format version '{fv.version}' "
+                        f"(field_exists: {detection.field_exists})"
+                    )
+                    return fv
+
+            # field_equals: Check if field equals specific value
+            if detection.field_equals:
+                path = detection.field_equals.get('path')
+                expected = detection.field_equals.get('value')
+                if path:
+                    value = FieldExtractor.extract(sample_finding, path, default=None)
+                    if value is not None and str(value) == str(expected):
+                        logger.info(
+                            f"Detected format version '{fv.version}' "
+                            f"(field_equals: {path}={expected})"
+                        )
+                        return fv
+
+            # field_contains: Check if field contains string
+            if detection.field_contains:
+                path = detection.field_contains.get('path')
+                substr = detection.field_contains.get('value')
+                if path and substr:
+                    value = FieldExtractor.extract(sample_finding, path, default=None)
+                    if value is not None and substr in str(value):
+                        logger.info(
+                            f"Detected format version '{fv.version}' "
+                            f"(field_contains: {path} contains '{substr}')"
+                        )
+                        return fv
+
+            # field_matches: Check if field matches regex
+            if detection.field_matches:
+                path = detection.field_matches.get('path')
+                pattern = detection.field_matches.get('pattern')
+                if path and pattern:
+                    value = FieldExtractor.extract(sample_finding, path, default=None)
+                    if value is not None:
+                        try:
+                            if re.search(pattern, str(value)):
+                                logger.info(
+                                    f"Detected format version '{fv.version}' "
+                                    f"(field_matches: {path} matches '{pattern}')"
+                                )
+                                return fv
+                        except re.error:
+                            logger.warning(f"Invalid regex pattern in version detection: {pattern}")
+
+        logger.warning("No format version matched for input data")
+        return None
+
+    def _get_effective_mappings(
+        self,
+        raw_findings: list[dict]
+    ) -> tuple[list[FieldMapping], str | None]:
+        """
+        Get the effective field mappings to use, potentially detecting version.
+
+        If format_versions is configured, detect the version from the first
+        finding and return that version's mappings.
+
+        Args:
+            raw_findings: List of raw findings from scan file
+
+        Returns:
+            Tuple of (field_mappings, detected_version_name)
+        """
+        # If using standard field_mappings
+        if self.config.field_mappings:
+            return self.config.field_mappings, None
+
+        # If using format_versions, detect from sample
+        if self.config.format_versions and raw_findings:
+            sample = raw_findings[0]
+            detected_version = self._detect_format_version(sample)
+
+            if detected_version:
+                return detected_version.field_mappings, detected_version.version
+
+            # No version matched - use first version as fallback
+            fallback = self.config.format_versions[0]
+            logger.warning(
+                f"No format version detected, using fallback: '{fallback.version}'"
+            )
+            return fallback.field_mappings, fallback.version
+
+        return [], None
+
     def normalize(self, scan_file_content: bytes) -> list[dict[str, Any]]:
         """
         Normalize scan file to DefectDojo findings format.
@@ -96,7 +215,12 @@ class NormalizerService:
         raw_findings = self.file_reader.read(scan_file_content, reader_config)
         logger.info(f"Extracted {len(raw_findings)} raw findings")
 
-        # Step 2: Normalize each finding
+        # Step 2: Detect format version and get effective mappings
+        self._effective_mappings, detected_version = self._get_effective_mappings(raw_findings)
+        if detected_version:
+            logger.info(f"Using format version: {detected_version}")
+
+        # Step 3: Normalize each finding
         normalized_findings = []
         for idx, raw_finding in enumerate(raw_findings):
             try:
@@ -144,8 +268,11 @@ class NormalizerService:
         """
         normalized = {}
 
+        # Get effective mappings (either from config or detected version)
+        effective_mappings = getattr(self, '_effective_mappings', None) or self.config.field_mappings or []
+
         # Process each field mapping
-        for field_mapping in self.config.field_mappings:
+        for field_mapping in effective_mappings:
             if not field_mapping.active:
                 continue
 
@@ -173,6 +300,11 @@ class NormalizerService:
             # Handle cvss_extractor data type - extracts CVSS to multiple fields
             if field_mapping.data_type == 'cvss_extractor':
                 self._process_cvss_extractor(raw_finding, field_mapping, normalized)
+                continue
+
+            # Handle conditional_severity data type - dynamic severity based on rules
+            if field_mapping.data_type == 'conditional_severity':
+                self._process_conditional_severity(raw_finding, field_mapping, normalized)
                 continue
 
             # Extract raw value using priority chain (source_fields) or single source
@@ -314,6 +446,14 @@ class NormalizerService:
         # Add default value if present
         if field_mapping.default:
             parser_config['default'] = field_mapping.default
+
+        # Add regex-specific configuration
+        if field_mapping.pattern:
+            parser_config['pattern'] = field_mapping.pattern
+        if field_mapping.regex_group is not None:
+            parser_config['group'] = field_mapping.regex_group
+        if field_mapping.match_mode:
+            parser_config['match_mode'] = field_mapping.match_mode
 
         # Parse the value
         try:
@@ -603,6 +743,174 @@ class NormalizerService:
                     f"CVSS extractor set: {target_field}={cvss_result[output_key]}"
                 )
 
+    def _process_request_response(
+        self,
+        raw_finding: dict,
+        normalized: dict
+    ) -> None:
+        """
+        Extract and process request/response pairs from the finding.
+
+        Handles three modes:
+        1. Separate fields (request_field + response_field)
+        2. Combined field (dict with request/response keys)
+        3. Array field (list of request/response pairs)
+
+        Args:
+            raw_finding: Raw finding dictionary from scan file
+            normalized: Normalized finding dict (modified in place)
+        """
+        if not self.config.request_response_mapping:
+            return
+
+        mapping = self.config.request_response_mapping
+        req_resp_list = []
+
+        # Mode 1: Separate request/response fields
+        if mapping.request_field and mapping.response_field:
+            request_data = FieldExtractor.extract(
+                raw_finding, mapping.request_field, default=None
+            )
+            response_data = FieldExtractor.extract(
+                raw_finding, mapping.response_field, default=None
+            )
+
+            if request_data or response_data:
+                req_resp_list.append({
+                    'req': str(request_data) if request_data else '',
+                    'resp': str(response_data) if response_data else ''
+                })
+                logger.debug(
+                    f"Extracted request/response pair from separate fields"
+                )
+
+        # Mode 2: Combined field (dict)
+        elif mapping.combined_field:
+            combined_data = FieldExtractor.extract(
+                raw_finding, mapping.combined_field, default=None
+            )
+
+            if isinstance(combined_data, dict):
+                request_data = combined_data.get(mapping.request_key)
+                response_data = combined_data.get(mapping.response_key)
+                if request_data or response_data:
+                    req_resp_list.append({
+                        'req': str(request_data) if request_data else '',
+                        'resp': str(response_data) if response_data else ''
+                    })
+                    logger.debug(
+                        f"Extracted request/response pair from combined field"
+                    )
+
+        # Mode 3: Array field (list of pairs)
+        elif mapping.array_field:
+            array_data = FieldExtractor.extract(
+                raw_finding, mapping.array_field, default=None
+            )
+
+            if isinstance(array_data, list):
+                for item in array_data:
+                    if isinstance(item, dict):
+                        request_data = item.get(mapping.request_key)
+                        response_data = item.get(mapping.response_key)
+                        if request_data or response_data:
+                            req_resp_list.append({
+                                'req': str(request_data) if request_data else '',
+                                'resp': str(response_data) if response_data else ''
+                            })
+                if req_resp_list:
+                    logger.debug(
+                        f"Extracted {len(req_resp_list)} request/response pairs from array"
+                    )
+
+        # Set unsaved_req_resp if we extracted any pairs
+        if req_resp_list:
+            normalized['unsaved_req_resp'] = req_resp_list
+
+    def _process_conditional_severity(
+        self,
+        raw_finding: dict,
+        field_mapping: FieldMapping,
+        normalized: dict
+    ) -> None:
+        """
+        Process conditional severity mapping to determine severity dynamically.
+
+        Evaluates each conditional_severity rule in order and assigns the
+        severity from the first matching rule.
+
+        Args:
+            raw_finding: Raw finding dictionary from scan file
+            field_mapping: Field mapping with conditional_severity configuration
+            normalized: Normalized finding dict (modified in place)
+        """
+        import re
+
+        if not field_mapping.conditional_severity:
+            logger.warning(
+                f"conditional_severity mapping has no rules for "
+                f"target '{field_mapping.target_field}'"
+            )
+            return
+
+        # Try each rule in order
+        for rule in field_mapping.conditional_severity:
+            # Extract the source field value
+            source_value = FieldExtractor.extract(
+                raw_finding,
+                rule.source_field,
+                default=None
+            )
+
+            if source_value is None:
+                continue
+
+            # Convert to string for comparison
+            source_str = str(source_value)
+            matched = False
+
+            # Evaluate condition
+            if rule.condition == 'equals':
+                matched = source_str == str(rule.value)
+            elif rule.condition == 'contains':
+                matched = str(rule.value) in source_str
+            elif rule.condition == 'starts_with':
+                matched = source_str.startswith(str(rule.value))
+            elif rule.condition == 'ends_with':
+                matched = source_str.endswith(str(rule.value))
+            elif rule.condition == 'regex':
+                try:
+                    matched = bool(re.search(str(rule.value), source_str))
+                except re.error:
+                    logger.warning(f"Invalid regex pattern: {rule.value}")
+            elif rule.condition == 'in':
+                if isinstance(rule.value, list):
+                    matched = source_str in [str(v) for v in rule.value]
+                else:
+                    matched = source_str == str(rule.value)
+
+            if matched:
+                normalized[field_mapping.target_field] = rule.severity
+                logger.debug(
+                    f"Conditional severity: matched rule "
+                    f"({rule.source_field} {rule.condition} {rule.value}), "
+                    f"setting severity={rule.severity}"
+                )
+                return
+
+        # No rule matched, use default
+        if field_mapping.default_severity:
+            normalized[field_mapping.target_field] = field_mapping.default_severity
+            logger.debug(
+                f"Conditional severity: no rules matched, "
+                f"using default_severity={field_mapping.default_severity}"
+            )
+        else:
+            logger.warning(
+                f"Conditional severity: no rules matched and no default_severity "
+                f"for '{field_mapping.target_field}'"
+            )
+
     def _add_metadata_fields(self, normalized: dict, raw_finding: dict):
         """
         Add metadata fields to normalized finding.
@@ -635,6 +943,9 @@ class NormalizerService:
                 )
                 if service_value:
                     normalized['service'] = str(service_value)
+
+        # Process request/response mapping if configured
+        self._process_request_response(raw_finding, normalized)
 
     def _validate_required_fields(self, normalized: dict):
         """
