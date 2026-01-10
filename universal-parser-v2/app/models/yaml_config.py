@@ -453,6 +453,10 @@ class YAMLConfig(BaseModel):
         default=None,
         description="XPath to finding elements (e.g., '//vulnerability')"
     )
+    xml_namespaces: Optional[dict[str, str]] = Field(
+        default=None,
+        description="XML namespace prefix to URI mappings (e.g., {'bom': 'http://cyclonedx.org/schema/bom/1.4'})"
+    )
     csv_delimiter: Optional[str] = Field(
         default=None,
         description="CSV delimiter character (e.g., ',')"
@@ -495,6 +499,16 @@ class YAMLConfig(BaseModel):
         if file_format == 'json' and not v:
             raise ValueError(
                 "json_root_path is required when file_format='json'"
+            )
+        return v
+
+    @validator('xml_finding_xpath')
+    def validate_xml_finding_xpath(cls, v, values):
+        """If format is XML, xml_finding_xpath is required"""
+        file_format = values.get('file_format')
+        if file_format == 'xml' and not v:
+            raise ValueError(
+                "xml_finding_xpath is required when file_format='xml'"
             )
         return v
 

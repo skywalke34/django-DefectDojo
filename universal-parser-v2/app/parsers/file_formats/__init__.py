@@ -1,13 +1,14 @@
 """File format readers for Universal Parser V2."""
 
 from app.parsers.file_formats.json_reader import JSONReader
+from app.parsers.file_formats.xml_reader import XMLReader
 
-__all__ = ['JSONReader']
+__all__ = ['JSONReader', 'XMLReader']
 
 # Registry of available file format readers
 FILE_FORMAT_READERS = {
     'json': JSONReader(),
-    # Future: 'xml': XMLReader(),
+    'xml': XMLReader(),
     # Future: 'csv': CSVReader(),
 }
 

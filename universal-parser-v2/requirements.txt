@@ -16,6 +16,9 @@ pyyaml>=6.0,<7.0
 # JSON Processing
 jsonpath-ng>=1.6.0,<2.0.0
 
+# XML Processing
+lxml>=4.9.0,<6.0.0
+
 # HTTP Client
 httpx>=0.25.0,<0.28.0
 

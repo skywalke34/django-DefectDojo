@@ -1,0 +1,135 @@
+# Universal Parser V2 - CycloneDX XML Configuration
+#
+# This YAML file defines how to parse CycloneDX XML (BOM) files
+# and map them to DefectDojo Finding fields.
+#
+# CycloneDX is a Software Bill of Materials (SBOM) format that can
+# include vulnerability information from dependency scanning tools.
+#
+# Supports:
+#   - CycloneDX BOM 1.4+ format
+#   - Vulnerability entries with CVSS scores
+#   - Component references via bom-ref
+#   - CWE and CVE identifiers
+
+# Parser Metadata
+parser_name: "CycloneDXXML"
+parser_version: "1.0"
+tool_name: "CycloneDX SBOM"
+tool_type: "CycloneDX_XML"
+
+# File Format Configuration
+file_format: "xml"
+file_encoding: "utf-8"
+
+# XPath to finding elements
+# Uses namespace prefix 'bom' for CycloneDX schema
+xml_finding_xpath: "//bom:vulnerability"
+
+# XML Namespace mappings
+# CycloneDX uses different namespace URIs per version
+# Common versions:
+#   - 1.4: http://cyclonedx.org/schema/bom/1.4
+#   - 1.5: http://cyclonedx.org/schema/bom/1.5
+#   - 1.6: http://cyclonedx.org/schema/bom/1.6
+xml_namespaces:
+  bom: "http://cyclonedx.org/schema/bom/1.4"
+
+# Field Mappings
+field_mappings:
+  # REQUIRED FIELD: Title
+  # Format: {vulnerability_id}
+  # The id element contains the vulnerability identifier (e.g., CVE-2021-44228)
+  - source_field: "id"
+    target_field: "title"
+    data_type: "string"
+    active: true
+
+  # REQUIRED FIELD: Description
+  - source_field: "description"
+    target_field: "description"
+    data_type: "string"
+    active: true
+    default: "No description provided"
+
+  # REQUIRED FIELD: Severity
+  # CycloneDX uses ratings/rating/severity element
+  # Values: critical, high, medium, low, info, none, unknown
+  - source_field: "ratings.rating.severity"
+    target_field: "severity"
+    data_type: "severity"
+    active: true
+    severity_mapping:
+      "critical": "Critical"
+      "high": "High"
+      "medium": "Medium"
+      "low": "Low"
+      "info": "Info"
+      "informational": "Info"
+      "none": "Info"
+      "unknown": "Info"
+
+  # CVSS v3 Vector
+  # CycloneDX stores CVSS in ratings/rating/vector
+  - source_field: "ratings.rating.vector"
+    target_field: "cvssv3"
+    data_type: "string"
+    active: true
+
+  # CVSS v3 Score
+  # CycloneDX stores score in ratings/rating/score
+  - source_field: "ratings.rating.score"
+    target_field: "cvssv3_score"
+    data_type: "float"
+    active: true
+
+  # CWE (Common Weakness Enumeration)
+  # CycloneDX stores CWEs in cwes/cwe element
+  - source_field: "cwes.cwe"
+    target_field: "cwe"
+    data_type: "integer"
+    active: true
+
+  # Mitigation / Recommendation
+  - source_field: "recommendation"
+    target_field: "mitigation"
+    data_type: "string"
+    active: true
+
+  # Vulnerability ID for tracking
+  # Use the id as unique identifier from tool
+  - source_field: "id"
+    target_field: "unique_id_from_tool"
+    data_type: "string"
+    active: true
+
+  # Affected Component (from affects/target/ref)
+  # This is a purl (package URL) reference
+  - source_field: "affects.target.ref"
+    target_field: "component_name"
+    data_type: "string"
+    active: true
+
+  # Static Finding (SBOM/SCA is static analysis)
+  - target_field: "static_finding"
+    data_type: "boolean"
+    active: true
+    fixed_value: "true"
+
+  # Dynamic Finding (SBOM is not dynamic)
+  - target_field: "dynamic_finding"
+    data_type: "boolean"
+    active: true
+    fixed_value: "false"
+
+# Deduplication Strategy
+# CycloneDX vulnerabilities are uniquely identified by their ID
+deduplication_fields:
+  - "unique_id_from_tool"
+  - "component_name"
+
+# Notes:
+# - CycloneDX BOM files may contain multiple namespaces for different versions
+# - If using a different CycloneDX version, update the xml_namespaces accordingly
+# - The affects/target/ref contains purl format: pkg:type/namespace/name@version
+# - For component_version extraction, you may need template strings or post-processing
