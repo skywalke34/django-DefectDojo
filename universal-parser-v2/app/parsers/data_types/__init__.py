@@ -9,11 +9,16 @@ from app.parsers.data_types.float_parser import FloatParser
 from app.parsers.data_types.array_parser import ArrayParser
 from app.parsers.data_types.template_parser import TemplateParser
 from app.parsers.data_types.cvss_extractor import CVSSExtractorParser
+from app.parsers.data_types.html_parser import HTMLToTextParser
+from app.parsers.data_types.endpoint_parser import EndpointParser
+from app.parsers.data_types.cwe_parser import CWEParser
+from app.parsers.data_types.regex_parser import RegexParser
 
 __all__ = [
     'StringParser', 'SeverityParser', 'DateParser', 'IntegerParser',
     'BooleanParser', 'FloatParser', 'ArrayParser', 'TemplateParser',
-    'CVSSExtractorParser'
+    'CVSSExtractorParser', 'HTMLToTextParser', 'EndpointParser', 'CWEParser',
+    'RegexParser'
 ]
 
 # Registry of available data type parsers
@@ -27,6 +32,10 @@ DATA_TYPE_PARSERS = {
     'array': ArrayParser(),
     'template': TemplateParser(),
     'cvss_extractor': CVSSExtractorParser(),
+    'html_to_text': HTMLToTextParser(),
+    'endpoint': EndpointParser(),
+    'cwe': CWEParser(),
+    'regex': RegexParser(),
 }
 
 

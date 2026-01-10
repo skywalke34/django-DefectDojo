@@ -19,6 +19,9 @@ jsonpath-ng>=1.6.0,<2.0.0
 # XML Processing
 lxml>=4.9.0,<6.0.0
 
+# HTML Processing
+html2text>=2020.1.16,<2025.0.0
+
 # HTTP Client
 httpx>=0.25.0,<0.28.0
 
