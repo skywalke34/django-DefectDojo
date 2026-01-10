@@ -1,0 +1,156 @@
+# Universal Parser V2 - Qualys Vulnerability Scan CSV Configuration
+#
+# This YAML file defines how to parse Qualys vulnerability scan CSV exports
+# and map them to DefectDojo Finding fields.
+#
+# Qualys CSV exports typically have:
+#   - Report header rows that need to be skipped
+#   - Standard column names for vulnerability data
+#   - Severity as numeric values (1-5)
+#   - QID as the unique vulnerability identifier
+
+# Parser Metadata
+parser_name: "QualysCSV"
+parser_version: "1.0"
+tool_name: "Qualys Vulnerability Scanner"
+tool_type: "Qualys_Scan_CSV"
+
+# File Format Configuration
+file_format: "csv"
+file_encoding: "utf-8"
+
+# CSV Configuration
+# Qualys exports often have 3-4 header rows before the actual data
+csv_skip_rows: 4
+csv_has_header: true
+csv_delimiter: ","
+
+# Field Mappings
+field_mappings:
+  # REQUIRED FIELD: Title
+  # Combine QID and Title for unique identification
+  - source_field: "Title"
+    target_field: "title"
+    data_type: "template"
+    template: "QID-{QID} | {Title}"
+    active: true
+
+  # REQUIRED FIELD: Description
+  # Use Threat field as main description
+  - source_field: "Threat"
+    target_field: "description"
+    data_type: "string"
+    active: true
+    default: "No description available"
+
+  # REQUIRED FIELD: Severity
+  # Qualys uses numeric severity (1-5):
+  #   1 = Informational
+  #   2 = Low
+  #   3 = Medium
+  #   4 = High
+  #   5 = Critical
+  - source_field: "Severity"
+    target_field: "severity"
+    data_type: "severity"
+    active: true
+    severity_mapping:
+      "1": "Info"
+      "2": "Low"
+      "3": "Medium"
+      "4": "High"
+      "5": "Critical"
+      # Also handle text values just in case
+      "Informational": "Info"
+      "Low": "Low"
+      "Medium": "Medium"
+      "High": "High"
+      "Critical": "Critical"
+
+  # Mitigation / Solution
+  - source_field: "Solution"
+    target_field: "mitigation"
+    data_type: "string"
+    active: true
+
+  # Impact
+  - source_field: "Impact"
+    target_field: "impact"
+    data_type: "string"
+    active: true
+
+  # CVE Reference
+  - source_field: "CVE ID"
+    target_field: "references"
+    data_type: "string"
+    active: true
+
+  # CVSS v3 Score
+  - source_field: "CVSS3 Base"
+    target_field: "cvssv3_score"
+    data_type: "float"
+    active: true
+
+  # Unique ID from Tool (QID)
+  - source_field: "QID"
+    target_field: "unique_id_from_tool"
+    data_type: "string"
+    active: true
+
+  # Vulnerability ID from Tool (also QID)
+  - source_field: "QID"
+    target_field: "vuln_id_from_tool"
+    data_type: "string"
+    active: true
+
+  # Date - Use Last Detected date
+  - source_field: "Last Detected"
+    target_field: "date"
+    data_type: "date"
+    active: true
+    date_format: "%Y-%m-%dT%H:%M:%SZ"
+
+  # Static Finding (Qualys is network/vulnerability scanning)
+  - target_field: "static_finding"
+    data_type: "boolean"
+    active: true
+    fixed_value: "false"
+
+  # Dynamic Finding
+  - target_field: "dynamic_finding"
+    data_type: "boolean"
+    active: true
+    fixed_value: "true"
+
+  # Active Status based on Vuln Status
+  # Qualys Vuln Status values: Active, Re-Opened, New, Fixed, etc.
+  - source_field: "Vuln Status"
+    target_field: "active"
+    data_type: "state_machine"
+    active: true
+    state_mapping:
+      "Active":
+        active: true
+      "Re-Opened":
+        active: true
+      "New":
+        active: true
+      "Fixed":
+        active: false
+        is_mitigated: true
+      "default":
+        active: true
+
+# Deduplication Strategy
+# QID + IP/DNS combination makes findings unique
+deduplication_fields:
+  - "unique_id_from_tool"
+  - "title"
+
+# Notes:
+# - Adjust csv_skip_rows based on your Qualys export format
+# - The exact column names may vary by Qualys product/version
+# - Common columns: IP, DNS, NetBIOS, QID, Title, Vuln Status, Severity,
+#   Port, Protocol, First Detected, Last Detected, CVE ID, CVSS3 Base,
+#   Threat, Impact, Solution
+# - For endpoints, additional processing would map IP/DNS to unsaved_endpoints

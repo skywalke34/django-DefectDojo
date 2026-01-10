@@ -2,14 +2,15 @@
 
 from app.parsers.file_formats.json_reader import JSONReader
 from app.parsers.file_formats.xml_reader import XMLReader
+from app.parsers.file_formats.csv_reader import CSVReader
 
-__all__ = ['JSONReader', 'XMLReader']
+__all__ = ['JSONReader', 'XMLReader', 'CSVReader']
 
 # Registry of available file format readers
 FILE_FORMAT_READERS = {
     'json': JSONReader(),
     'xml': XMLReader(),
-    # Future: 'csv': CSVReader(),
+    'csv': CSVReader(),
 }
 
 

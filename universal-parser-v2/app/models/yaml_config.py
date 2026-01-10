@@ -469,6 +469,10 @@ class YAMLConfig(BaseModel):
         default=None,
         description="Whether CSV file has header row"
     )
+    csv_quote_char: Optional[str] = Field(
+        default=None,
+        description="CSV quote character (default: '\"')"
+    )
 
     # Field Mappings
     field_mappings: List[FieldMapping] = Field(
@@ -510,6 +514,14 @@ class YAMLConfig(BaseModel):
             raise ValueError(
                 "xml_finding_xpath is required when file_format='xml'"
             )
+        return v
+
+    @validator('csv_has_header', always=True)
+    def validate_csv_has_header(cls, v, values):
+        """If format is CSV, csv_has_header defaults to True"""
+        file_format = values.get('file_format')
+        if file_format == 'csv' and v is None:
+            return True  # Default to True for CSV
         return v
 
     @validator('field_mappings')
