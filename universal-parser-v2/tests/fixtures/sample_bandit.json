@@ -1,0 +1,37 @@
+{
+  "generated_at": "2024-01-15T10:30:00Z",
+  "results": [
+    {
+      "test_name": "hardcoded_password_string",
+      "test_id": "B105",
+      "filename": "app/config.py",
+      "line_number": 42,
+      "issue_confidence": "High",
+      "issue_severity": "HIGH",
+      "issue_text": "Possible hardcoded password: 'secret123'",
+      "code": "PASSWORD = 'secret123'  # noqa",
+      "more_info": "https://bandit.readthedocs.io/en/latest/plugins/b105_hardcoded_password_string.html"
+    },
+    {
+      "test_name": "exec_used",
+      "test_id": "B102",
+      "filename": "app/utils.py",
+      "line_number": 15,
+      "issue_confidence": "High",
+      "issue_severity": "MEDIUM",
+      "issue_text": "Use of exec detected.",
+      "code": "exec(user_input)",
+      "more_info": "https://bandit.readthedocs.io/en/latest/plugins/b102_exec_used.html"
+    },
+    {
+      "test_name": "assert_used",
+      "test_id": "B101",
+      "filename": "tests/test_main.py",
+      "line_number": 8,
+      "issue_confidence": "High",
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected.",
+      "code": "assert result == expected"
+    }
+  ]
+}

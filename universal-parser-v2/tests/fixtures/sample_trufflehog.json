@@ -1,0 +1,42 @@
+[
+  {
+    "SourceMetadata": {
+      "Data": {
+        "Git": {
+          "file": "config/secrets.py",
+          "line": 15,
+          "commit": "abc123def456789",
+          "repository": "https://github.com/example/app",
+          "email": "developer@example.com",
+          "timestamp": "2024-01-15T10:30:00Z",
+          "link": "https://github.com/example/app/blob/abc123def456789/config/secrets.py#L15"
+        }
+      }
+    },
+    "DetectorName": "AWS",
+    "Verified": true,
+    "Raw": "AKIAIOSFODNN7EXAMPLE",
+    "RawV2": "",
+    "Redacted": "AKIA***EXAMPLE"
+  },
+  {
+    "SourceMetadata": {
+      "Data": {
+        "Git": {
+          "file": "app/oauth.py",
+          "line": 42,
+          "commit": "def789abc012345",
+          "repository": "https://github.com/example/app",
+          "email": "developer@example.com",
+          "timestamp": "2024-01-14T15:20:00Z",
+          "link": "https://github.com/example/app/blob/def789abc012345/app/oauth.py#L42"
+        }
+      }
+    },
+    "DetectorName": "GenericSecret",
+    "Verified": false,
+    "Raw": "supersecretpassword123",
+    "RawV2": "",
+    "Redacted": "super***123"
+  }
+]

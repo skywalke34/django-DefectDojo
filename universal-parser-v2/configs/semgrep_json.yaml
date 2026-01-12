@@ -1,0 +1,183 @@
+# Universal Parser V2 - Semgrep JSON Configuration
+#
+# Parses Semgrep static analysis scanner JSON output.
+# Supports both SAST (results) and dependency scanning (vulns) formats.
+#
+# Semgrep is a fast, open-source static analysis tool.
+# https://github.com/returntocorp/semgrep
+#
+# Author: T. Walker - DefectDojo
+
+parser_name: "SemgrepJSON"
+parser_version: "1.0"
+tool_name: "Semgrep"
+tool_type: "Semgrep JSON Report"
+
+file_format: "json"
+file_encoding: "utf-8"
+
+# Default path for SAST results format
+json_root_path: "$.results[*]"
+
+# Version detection for results vs vulns format
+format_versions:
+  # SAST scanning format (results array)
+  - version: "sast"
+    detection:
+      field_exists: "results"
+    json_root_path: "$.results[*]"
+    field_mappings:
+      # Title from check/rule ID
+      - source_field: "check_id"
+        target_field: "title"
+        data_type: "string"
+
+      # Description with message and code snippet
+      - source_fields: ["extra.message", "extra.lines"]
+        target_field: "description"
+        data_type: "template"
+        template: |
+          **Result Message:**
+          {extra.message}
+
+          **Code Snippet:**
+          ```
+          {extra.lines}
+          ```
+
+      # Severity mapping
+      - source_field: "extra.severity"
+        target_field: "severity"
+        data_type: "severity"
+        severity_mapping:
+          CRITICAL: "Critical"
+          ERROR: "High"
+          HIGH: "High"
+          WARNING: "Medium"
+          MEDIUM: "Medium"
+          LOW: "Low"
+          INFO: "Info"
+        default: "Medium"
+
+      # File path
+      - source_field: "path"
+        target_field: "file_path"
+        data_type: "string"
+
+      # Line number
+      - source_field: "start.line"
+        target_field: "line"
+        data_type: "integer"
+
+      # Vuln ID from check_id
+      - source_field: "check_id"
+        target_field: "vuln_id_from_tool"
+        data_type: "string"
+
+      # Unique ID from fingerprint
+      - source_field: "extra.fingerprint"
+        target_field: "unique_id_from_tool"
+        data_type: "string"
+
+      # CWE extraction
+      - source_field: "extra.metadata.cwe"
+        target_field: "cwe"
+        data_type: "cwe"
+
+      # References
+      - source_field: "extra.metadata.references"
+        target_field: "references"
+        data_type: "array"
+        array_join: "\n"
+
+      # Mitigation from fix
+      - source_fields: ["extra.fix", "extra.fix_regex"]
+        target_field: "mitigation"
+        data_type: "string"
+
+      # Static finding flags
+      - target_field: "static_finding"
+        data_type: "boolean"
+        fixed_value: true
+      - target_field: "dynamic_finding"
+        data_type: "boolean"
+        fixed_value: false
+
+      # Occurrence counter
+      - target_field: "nb_occurences"
+        data_type: "integer"
+        fixed_value: 1
+
+  # Dependency scanning format (vulns array)
+  - version: "sca"
+    detection:
+      field_exists: "vulns"
+    json_root_path: "$.vulns[*]"
+    field_mappings:
+      # Title from vulnerability title
+      - source_field: "title"
+        target_field: "title"
+        data_type: "string"
+
+      # Description from advisory
+      - source_field: "advisory.description"
+        target_field: "description"
+        data_type: "string"
+
+      # Severity mapping
+      - source_field: "advisory.severity"
+        target_field: "severity"
+        data_type: "severity"
+        severity_mapping:
+          CRITICAL: "Critical"
+          ERROR: "High"
+          HIGH: "High"
+          WARNING: "Medium"
+          MEDIUM: "Medium"
+          LOW: "Low"
+          INFO: "Info"
+        default: "Medium"
+
+      # File path from dependency location
+      - source_field: "dependencyFileLocation.path"
+        target_field: "file_path"
+        data_type: "string"
+
+      # Line number
+      - source_field: "dependencyFileLocation.startLine"
+        target_field: "line"
+        data_type: "integer"
+
+      # Vuln ID from repository ID
+      - source_field: "repositoryId"
+        target_field: "vuln_id_from_tool"
+        data_type: "string"
+
+      # Unique ID from fingerprint
+      - source_field: "extra.fingerprint"
+        target_field: "unique_id_from_tool"
+        data_type: "string"
+
+      # CWE from advisory
+      - source_field: "advisory.references.cweIds"
+        target_field: "cwe"
+        data_type: "cwe"
+
+      # Static finding flags
+      - target_field: "static_finding"
+        data_type: "boolean"
+        fixed_value: true
+      - target_field: "dynamic_finding"
+        data_type: "boolean"
+        fixed_value: false
+
+      # Occurrence counter
+      - target_field: "nb_occurences"
+        data_type: "integer"
+        fixed_value: 1
+
+# Deduplication based on title + file + line
+deduplication_fields:
+  - "title"
+  - "file_path"
+  - "line"

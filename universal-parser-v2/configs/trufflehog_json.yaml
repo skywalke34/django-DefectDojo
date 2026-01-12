@@ -1,0 +1,233 @@
+# Universal Parser V2 - TruffleHog JSON Configuration
+#
+# Parses TruffleHog secret scanner JSON output.
+# Supports both TruffleHog v2 and v3 formats with auto-detection.
+#
+# TruffleHog scans git repositories for secrets and credentials.
+# https://github.com/trufflesecurity/trufflehog
+#
+# Author: T. Walker - DefectDojo
+
+parser_name: "TruffleHogJSON"
+parser_version: "1.0"
+tool_name: "TruffleHog"
+tool_type: "TruffleHog Scan"
+
+file_format: "json"
+file_encoding: "utf-8"
+
+# TruffleHog outputs JSONL (one JSON object per line)
+# Root path selects each line/object
+json_root_path: "$[*]"
+
+# Version detection for v2 vs v3 format
+format_versions:
+  # TruffleHog v3 - identified by SourceMetadata field
+  - version: "v3"
+    detection:
+      field_exists: "SourceMetadata"
+    field_mappings:
+      # Title includes detector name and file
+      - source_fields: ["DetectorName", "SourceMetadata.Data.*.file"]
+        target_field: "title"
+        data_type: "template"
+        template: "Hard Coded {DetectorName} secret in: {SourceMetadata.Data.*.file}"
+
+      # Description with full details
+      - target_field: "description"
+        data_type: "template"
+        template: |
+          **Detector:** {DetectorName}
+          **Verified:** {Verified}
+          **File:** {SourceMetadata.Data.*.file}
+          **Line:** {SourceMetadata.Data.*.line}
+          **Commit:** {SourceMetadata.Data.*.commit}
+          **Repository:** {SourceMetadata.Data.*.repository}
+          **Email:** {SourceMetadata.Data.*.email}
+          **Timestamp:** {SourceMetadata.Data.*.timestamp}
+
+          **Redacted Secret:** {Redacted}
+
+      # Conditional severity based on detector and verification
+      - target_field: "severity"
+        data_type: "conditional_severity"
+        conditional_severity:
+          # Verified secrets are always Critical
+          - source_field: "Verified"
+            condition: "equals"
+            value: true
+            severity: "Critical"
+          # AWS/OAuth/Heroku unverified = Critical
+          - source_field: "DetectorName"
+            condition: "contains"
+            value: "AWS"
+            severity: "Critical"
+          - source_field: "DetectorName"
+            condition: "contains"
+            value: "OAuth"
+            severity: "Critical"
+          - source_field: "DetectorName"
+            condition: "contains"
+            value: "Heroku"
+            severity: "Critical"
+          # Private keys unverified = High
+          - source_field: "DetectorName"
+            condition: "contains"
+            value: "PrivateKey"
+            severity: "High"
+          # Generic secrets = Medium
+          - source_field: "DetectorName"
+            condition: "contains"
+            value: "Generic"
+            severity: "Medium"
+        default_severity: "High"
+
+      # File path from source metadata
+      - source_field: "SourceMetadata.Data.*.file"
+        target_field: "file_path"
+        data_type: "string"
+
+      # Line number
+      - source_field: "SourceMetadata.Data.*.line"
+        target_field: "line"
+        data_type: "integer"
+
+      # Unique ID hash for deduplication
+      - source_fields: ["SourceMetadata.Data.*.file", "DetectorName", "SourceMetadata.Data.*.line", "SourceMetadata.Data.*.commit", "Raw", "RawV2"]
+        target_field: "unique_id_from_tool"
+        data_type: "hash"
+        hash_algorithm: "md5"
+
+      # Mitigation with commit link
+      - source_field: "SourceMetadata.Data.*.link"
+        target_field: "mitigation"
+        data_type: "template"
+        template: |
+          Remove the hard-coded secret and store it in a secure secrets management vault.
+
+          View commit: {SourceMetadata.Data.*.link}
+
+      # CWE 798 - Use of Hard-Coded Credentials
+      - target_field: "cwe"
+        data_type: "integer"
+        fixed_value: 798
+
+      # Impact statement
+      - target_field: "impact"
+        data_type: "string"
+        fixed_value: "If a hard-coded credential is exposed, the attacker may be able to use the credential to access sensitive systems or data."
+
+      # Static finding flags
+      - target_field: "static_finding"
+        data_type: "boolean"
+        fixed_value: true
+      - target_field: "dynamic_finding"
+        data_type: "boolean"
+        fixed_value: false
+
+      # Occurrence counter
+      - target_field: "nb_occurences"
+        data_type: "integer"
+        fixed_value: 1
+
+  # TruffleHog v2 - identified by path field
+  - version: "v2"
+    detection:
+      field_exists: "path"
+    field_mappings:
+      # Title includes reason and file path
+      - source_fields: ["reason", "path"]
+        target_field: "title"
+        data_type: "template"
+        template: "Hard Coded {reason} secret in: {path}"
+
+      # Description with commit details
+      - target_field: "description"
+        data_type: "template"
+        template: |
+          **Reason:** {reason}
+          **File:** {path}
+          **Branch:** {branch}
+          **Commit:** {commit}
+          **Commit Hash:** {commitHash}
+          **Date:** {date}
+
+          **Strings Found:**
+          {stringsFound}
+
+      # Conditional severity based on reason
+      - target_field: "severity"
+        data_type: "conditional_severity"
+        conditional_severity:
+          # High entropy = Info (likely false positive)
+          - source_field: "reason"
+            condition: "contains"
+            value: "High Entropy"
+            severity: "Info"
+          # AWS/OAuth/Heroku = Critical
+          - source_field: "reason"
+            condition: "contains"
+            value: "AWS"
+            severity: "Critical"
+          - source_field: "reason"
+            condition: "contains"
+            value: "OAuth"
+            severity: "Critical"
+          - source_field: "reason"
+            condition: "contains"
+            value: "Heroku"
+            severity: "Critical"
+          # Generic = Medium
+          - source_field: "reason"
+            condition: "contains"
+            value: "Generic"
+            severity: "Medium"
+        default_severity: "High"
+
+      # File path
+      - source_field: "path"
+        target_field: "file_path"
+        data_type: "string"
+
+      # Unique ID hash (file + reason)
+      - source_fields: ["path", "reason"]
+        target_field: "unique_id_from_tool"
+        data_type: "hash"
+        hash_algorithm: "md5"
+
+      # Standard mitigation
+      - target_field: "mitigation"
+        data_type: "string"
+        fixed_value: "Remove the hard-coded secret and store it in a secure secrets management vault."
+
+      # CWE 798
+      - target_field: "cwe"
+        data_type: "integer"
+        fixed_value: 798
+
+      # Impact statement
+      - target_field: "impact"
+        data_type: "string"
+        fixed_value: "If a hard-coded credential is exposed, the attacker may be able to use the credential to access sensitive systems or data."
+
+      # Static finding flags
+      - target_field: "static_finding"
+        data_type: "boolean"
+        fixed_value: true
+      - target_field: "dynamic_finding"
+        data_type: "boolean"
+        fixed_value: false
+
+      # Line defaults to 0 for v2
+      - target_field: "line"
+        data_type: "integer"
+        fixed_value: 0
+
+      # Occurrence counter
+      - target_field: "nb_occurences"
+        data_type: "integer"
+        fixed_value: 1
+
+# Deduplication based on unique hash
+deduplication_fields:
+  - "unique_id_from_tool"

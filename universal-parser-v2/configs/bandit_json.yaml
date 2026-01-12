@@ -1,0 +1,107 @@
+# Universal Parser V2 - Bandit JSON Configuration
+#
+# Parses Bandit Python security scanner JSON output.
+# Bandit is a tool for finding common security issues in Python code.
+#
+# https://github.com/PyCQA/bandit
+#
+# Author: T. Walker - DefectDojo
+
+parser_name: "BanditJSON"
+parser_version: "1.0"
+tool_name: "Bandit"
+tool_type: "Bandit Scan"
+
+file_format: "json"
+file_encoding: "utf-8"
+
+# Bandit results are in the results array
+json_root_path: "$.results[*]"
+
+field_mappings:
+  # REQUIRED: Title from issue text
+  - source_field: "issue_text"
+    target_field: "title"
+    data_type: "string"
+    active: true
+
+  # REQUIRED: Description with code snippet
+  - source_fields: ["test_name", "test_id", "filename", "line_number", "issue_confidence", "code"]
+    target_field: "description"
+    data_type: "template"
+    active: true
+    template: |
+      **Test:** {test_name} (`{test_id}`)
+      **File:** {filename}
+      **Line:** {line_number}
+      **Confidence:** {issue_confidence}
+
+      **Code:**
+      ```python
+      {code}
+      ```
+
+  # REQUIRED: Severity mapping
+  - source_field: "issue_severity"
+    target_field: "severity"
+    data_type: "severity"
+    active: true
+    severity_mapping:
+      HIGH: "High"
+      MEDIUM: "Medium"
+      LOW: "Low"
+      UNDEFINED: "Info"
+    default: "Medium"
+
+  # File path
+  - source_field: "filename"
+    target_field: "file_path"
+    data_type: "string"
+    active: true
+
+  # Line number
+  - source_field: "line_number"
+    target_field: "line"
+    data_type: "integer"
+    active: true
+
+  # Vulnerability ID from test name and ID
+  - source_fields: ["test_name", "test_id"]
+    target_field: "vuln_id_from_tool"
+    data_type: "template"
+    active: true
+    template: "{test_name}:{test_id}"
+
+  # Unique ID for deduplication
+  - source_fields: ["filename", "line_number", "test_id"]
+    target_field: "unique_id_from_tool"
+    data_type: "template"
+    active: true
+    template: "{filename}:{line_number}:{test_id}"
+
+  # References from more_info
+  - source_field: "more_info"
+    target_field: "references"
+    data_type: "string"
+    active: true
+
+  # Static finding flags
+  - target_field: "static_finding"
+    data_type: "boolean"
+    active: true
+    fixed_value: true
+
+  - target_field: "dynamic_finding"
+    data_type: "boolean"
+    active: true
+    fixed_value: false
+
+  # Occurrence counter
+  - target_field: "nb_occurences"
+    data_type: "integer"
+    active: true
+    fixed_value: 1
+
+# Deduplication based on file + line + test
+deduplication_fields:
+  - "unique_id_from_tool"

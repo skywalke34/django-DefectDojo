@@ -1,0 +1,53 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "myapp:latest",
+  "ArtifactType": "container_image",
+  "Results": [
+    {
+      "Target": "myapp:latest (debian 11.5)",
+      "Class": "os-pkgs",
+      "Type": "debian",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2021-44228",
+          "PkgName": "log4j",
+          "InstalledVersion": "2.14.1",
+          "FixedVersion": "2.17.0",
+          "Title": "Apache Log4j2 Remote Code Execution",
+          "Description": "Apache Log4j2 2.0-beta9 through 2.14.1 JNDI features are vulnerable to remote code execution.",
+          "Severity": "CRITICAL",
+          "CweIDs": ["CWE-502"],
+          "CVSS": {
+            "nvd": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+              "V3Score": 10.0
+            }
+          },
+          "PrimaryURL": "https://nvd.nist.gov/vuln/detail/CVE-2021-44228",
+          "References": [
+            "https://logging.apache.org/log4j/2.x/security.html",
+            "https://github.com/advisories/GHSA-jfh8-c2jp-5v3q"
+          ],
+          "PkgPath": "usr/share/java/log4j-core-2.14.1.jar"
+        },
+        {
+          "VulnerabilityID": "CVE-2022-22965",
+          "PkgName": "spring-framework",
+          "InstalledVersion": "5.3.17",
+          "FixedVersion": "5.3.18",
+          "Title": "Spring Framework RCE via Data Binding",
+          "Description": "A Spring MVC or Spring WebFlux application running on JDK 9+ may be vulnerable to remote code execution via data binding.",
+          "Severity": "HIGH",
+          "CweIDs": ["CWE-94"],
+          "CVSS": {
+            "nvd": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "V3Score": 9.8
+            }
+          },
+          "PrimaryURL": "https://nvd.nist.gov/vuln/detail/CVE-2022-22965"
+        }
+      ]
+    }
+  ]
+}

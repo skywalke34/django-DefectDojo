@@ -1,0 +1,143 @@
+# Universal Parser V2 - Nuclei JSON Configuration
+#
+# Parses Nuclei security scanner JSON output.
+# Supports both JSON array and JSONL (newline-delimited) formats.
+#
+# Nuclei is a fast, customizable vulnerability scanner based on simple YAML templates.
+# https://github.com/projectdiscovery/nuclei
+#
+# Author: T. Walker - DefectDojo
+
+parser_name: "NucleiJSON"
+parser_version: "1.0"
+tool_name: "Nuclei"
+tool_type: "Nuclei Scan"
+
+file_format: "json"
+file_encoding: "utf-8"
+
+# Nuclei outputs findings at root level as an array
+json_root_path: "$[*]"
+
+field_mappings:
+  # REQUIRED: Title from template info
+  - source_field: "info.name"
+    target_field: "title"
+    data_type: "string"
+    active: true
+
+  # REQUIRED: Description with extracted results appended
+  - source_fields: ["info.description", "extracted-results"]
+    target_field: "description"
+    data_type: "template"
+    active: true
+    template: |
+      {info.description}
+
+      **Extracted Results:**
+      {extracted-results}
+
+  # REQUIRED: Severity mapping
+  - source_field: "info.severity"
+    target_field: "severity"
+    data_type: "severity"
+    active: true
+    severity_mapping:
+      critical: "Critical"
+      high: "High"
+      medium: "Medium"
+      low: "Low"
+      info: "Info"
+      informational: "Info"
+      unknown: "Low"
+    default: "Low"
+
+  # Vulnerability ID from template
+  - source_fields: ["templateID", "template-id"]
+    target_field: "vuln_id_from_tool"
+    data_type: "string"
+    active: true
+
+  # Unique ID for deduplication (hash of key fields)
+  - source_fields: ["templateID", "template-id", "type", "matcher-name", "matcher_name", "host"]
+    target_field: "unique_id_from_tool"
+    data_type: "hash"
+    active: true
+    hash_algorithm: "sha256"
+
+  # Date from timestamp
+  - source_field: "timestamp"
+    target_field: "date"
+    data_type: "date"
+    active: true
+    date_format: "auto"
+
+  # CWE extraction from classification
+  - source_field: "info.classification.cwe-id"
+    target_field: "cwe"
+    data_type: "cwe"
+    active: true
+
+  # CVSS information
+  - target_field: "_cvss"
+    data_type: "cvss_extractor"
+    active: true
+    cvss_sources:
+      - path: "info.classification.cvss-metrics"
+        score_path: "info.classification.cvss-score"
+    cvss_outputs:
+      cvssv3: "cvssv3"
+      cvssv3_score: "cvssv3_score"
+
+  # References from template
+  - source_field: "info.reference"
+    target_field: "references"
+    data_type: "array"
+    active: true
+    array_join: "\n"
+
+  # Endpoint from matched URL
+  - source_fields: ["matched", "matched-at"]
+    target_field: "unsaved_endpoints"
+    data_type: "endpoint"
+    active: true
+    add_protocol_if_missing: "//"
+
+  # Component/matcher name
+  - source_fields: ["matcher-name", "matcher_name"]
+    target_field: "component_name"
+    data_type: "string"
+    active: true
+
+  # Mitigation/remediation
+  - source_field: "info.remediation"
+    target_field: "mitigation"
+    data_type: "string"
+    active: true
+
+  # Steps to reproduce via curl
+  - source_field: "curl-command"
+    target_field: "steps_to_reproduce"
+    data_type: "string"
+    active: true
+
+  # Initialize occurrence counter
+  - target_field: "nb_occurences"
+    data_type: "integer"
+    active: true
+    fixed_value: 1
+
+  # Mark as dynamic finding (DAST)
+  - target_field: "dynamic_finding"
+    data_type: "boolean"
+    active: true
+    fixed_value: true
+
+# Request/Response for DAST findings
+request_response_mapping:
+  request_field: "request"
+  response_field: "response"
+
+# Deduplication based on unique hash
+deduplication_fields:
+  - "unique_id_from_tool"

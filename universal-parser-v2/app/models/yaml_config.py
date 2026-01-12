@@ -459,7 +459,7 @@ class FieldMapping(BaseModel):
         allowed = [
             'string', 'severity', 'date', 'integer', 'boolean', 'float', 'array',
             'template', 'state_machine', 'cvss_extractor',
-            'html_to_text', 'endpoint', 'cwe', 'regex', 'conditional_severity'
+            'html_to_text', 'hash', 'endpoint', 'cwe', 'regex', 'conditional_severity'
         ]
         if v not in allowed:
             raise ValueError(
@@ -519,9 +519,10 @@ class FieldMapping(BaseModel):
             'title', 'description', 'severity', 'date', 'cwe', 'cvssv3',
             'cvssv3_score', 'cvssv4', 'cvssv4_score', 'active', 'verified',
             'false_p', 'mitigation', 'impact', 'references', 'file_path',
-            'line', 'unique_id_from_tool', 'component_name', 'component_version',
-            'static_finding', 'dynamic_finding', 'risk_accepted', 'out_of_scope',
-            'is_mitigated', 'unsaved_req_resp', 'unsaved_endpoints', 'nb_occurences'
+            'line', 'unique_id_from_tool', 'vuln_id_from_tool', 'component_name',
+            'component_version', 'static_finding', 'dynamic_finding', 'risk_accepted',
+            'out_of_scope', 'is_mitigated', 'unsaved_req_resp', 'unsaved_endpoints',
+            'nb_occurences', 'steps_to_reproduce'
         }
 
         # Allow virtual/internal target fields (prefixed with _) without warning

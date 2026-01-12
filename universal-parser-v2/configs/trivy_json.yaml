@@ -1,0 +1,136 @@
+# Universal Parser V2 - Trivy JSON Configuration
+#
+# Parses Trivy vulnerability scanner JSON output.
+# Focuses on vulnerability scanning results (package vulnerabilities).
+#
+# Trivy is a comprehensive security scanner for containers and filesystems.
+# https://github.com/aquasecurity/trivy
+#
+# Author: T. Walker - DefectDojo
+
+parser_name: "TrivyJSON"
+parser_version: "1.0"
+tool_name: "Trivy"
+tool_type: "Trivy Scan"
+
+file_format: "json"
+file_encoding: "utf-8"
+
+# Trivy v2 schema: Results array contains Vulnerabilities
+# Path to vulnerability objects within each result
+json_root_path: "$.Results[*].Vulnerabilities[*]"
+
+field_mappings:
+  # REQUIRED: Title with CVE ID and package info
+  - source_fields: ["VulnerabilityID", "PkgName", "InstalledVersion"]
+    target_field: "title"
+    data_type: "template"
+    active: true
+    template: "{VulnerabilityID} - {PkgName} {InstalledVersion}"
+
+  # REQUIRED: Description with vulnerability details
+  - source_fields: ["Title", "Description", "PkgName", "InstalledVersion", "FixedVersion"]
+    target_field: "description"
+    data_type: "template"
+    active: true
+    template: |
+      **{Title}**
+
+      {Description}
+
+      **Package:** {PkgName}
+      **Installed Version:** {InstalledVersion}
+      **Fixed Version:** {FixedVersion}
+
+  # REQUIRED: Severity mapping
+  - source_field: "Severity"
+    target_field: "severity"
+    data_type: "severity"
+    active: true
+    severity_mapping:
+      CRITICAL: "Critical"
+      HIGH: "High"
+      MEDIUM: "Medium"
+      LOW: "Low"
+      UNKNOWN: "Info"
+    default: "Info"
+
+  # Component name (package)
+  - source_field: "PkgName"
+    target_field: "component_name"
+    data_type: "string"
+    active: true
+
+  # Component version
+  - source_field: "InstalledVersion"
+    target_field: "component_version"
+    data_type: "string"
+    active: true
+
+  # Vulnerability ID
+  - source_field: "VulnerabilityID"
+    target_field: "unique_id_from_tool"
+    data_type: "string"
+    active: true
+
+  # Mitigation (fixed version)
+  - source_field: "FixedVersion"
+    target_field: "mitigation"
+    data_type: "template"
+    active: true
+    template: "Upgrade {PkgName} to version {FixedVersion} or later."
+
+  # CWE extraction
+  - source_field: "CweIDs"
+    target_field: "cwe"
+    data_type: "cwe"
+    active: true
+
+  # CVSS extraction with multiple fallback sources
+  - target_field: "_cvss"
+    data_type: "cvss_extractor"
+    active: true
+    cvss_sources:
+      # Try CVSS from primary source first
+      - path: "CVSS.nvd.V3Vector"
+        score_path: "CVSS.nvd.V3Score"
+      - path: "CVSS.ghsa.V3Vector"
+        score_path: "CVSS.ghsa.V3Score"
+      - path: "CVSS.redhat.V3Vector"
+        score_path: "CVSS.redhat.V3Score"
+      # Fallback to V2 if no V3
+      - path: "CVSS.nvd.V2Vector"
+        score_path: "CVSS.nvd.V2Score"
+    cvss_outputs:
+      cvssv3: "cvssv3"
+      cvssv3_score: "cvssv3_score"
+
+  # References from links
+  - source_fields: ["PrimaryURL", "References"]
+    target_field: "references"
+    data_type: "array"
+    active: true
+    array_join: "\n"
+
+  # File path (package path)
+  - source_field: "PkgPath"
+    target_field: "file_path"
+    data_type: "string"
+    active: true
+
+  # Static finding (SCA)
+  - target_field: "static_finding"
+    data_type: "boolean"
+    active: true
+    fixed_value: true
+
+  - target_field: "dynamic_finding"
+    data_type: "boolean"
+    active: true
+    fixed_value: false
+
+# Deduplication by vulnerability ID + package + version
+deduplication_fields:
+  - "unique_id_from_tool"
+  - "component_name"
+  - "component_version"

@@ -1,0 +1,40 @@
+{
+  "results": [
+    {
+      "check_id": "python.lang.security.audit.exec-detected",
+      "path": "app/utils.py",
+      "start": {"line": 15, "col": 1},
+      "end": {"line": 15, "col": 20},
+      "extra": {
+        "severity": "ERROR",
+        "message": "Detected use of exec(). This is dangerous and can lead to code injection.",
+        "lines": "exec(user_input)",
+        "fingerprint": "abc123def456",
+        "metadata": {
+          "cwe": ["CWE-94: Improper Control of Generation of Code"],
+          "references": [
+            "https://owasp.org/www-community/attacks/Code_Injection",
+            "https://cwe.mitre.org/data/definitions/94.html"
+          ]
+        },
+        "fix": "import ast\nast.literal_eval(user_input)"
+      }
+    },
+    {
+      "check_id": "python.lang.security.audit.hardcoded-password",
+      "path": "config/settings.py",
+      "start": {"line": 42, "col": 1},
+      "end": {"line": 42, "col": 30},
+      "extra": {
+        "severity": "WARNING",
+        "message": "Hardcoded password detected. Store secrets in environment variables.",
+        "lines": "PASSWORD = 'secret123'",
+        "fingerprint": "xyz789abc012",
+        "metadata": {
+          "cwe": ["CWE-798: Use of Hard-coded Credentials"],
+          "references": ["https://cwe.mitre.org/data/definitions/798.html"]
+        }
+      }
+    }
+  ]
+}
