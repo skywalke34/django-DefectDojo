@@ -133,7 +133,7 @@ Early Light writes two report formats that DefectDojo can import:
 | CVEs | Only the finding's own CVEs. eMudhra trust-store findings have none | Every finding gets its detector's CVEs |
 | Matching on reimport | By detector, kind, target and path, so a Finding stays the same Finding when, for example, the installed version changes | By every fact Early Light reports, including versions, so a version change closes the Finding and opens a new one |
 
-Use JSON with the **Early Light Scan** type when your DefectDojo version lists it under Scan Type, and SARIF otherwise. The [Early Light parser](/supported_tools/parsers/file/earlylight/) page describes how each JSON field is mapped and how severity is chosen.
+Use JSON with the **Early Light Scan** type, which DefectDojo Open Source includes from version 3.5.103. On an earlier version, or if **Early Light Scan** isn't listed under Scan Type, use SARIF. The [Early Light parser](/supported_tools/parsers/file/earlylight/) page describes how each JSON field is mapped and how severity is chosen.
 
 ### From the UI
 
